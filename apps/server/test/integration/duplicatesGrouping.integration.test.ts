@@ -300,54 +300,36 @@ describe('GET /library/duplicates (real SQL)', () => {
     expect(item.episodeNumber).toBe(2);
   });
 
-  it('does not fuzzy-match episodes with the same episode title from different shows', async () => {
+  it('never fuzzy-matches episodes across shows but groups copies within one show', async () => {
     const server = await createTestServer();
-    for (const [showTitle, size] of [
+    const pilot = (show: string, fileSize: number) =>
+      createTestLibraryItem({
+        serverId: server.id,
+        title: 'Pilot',
+        mediaType: 'episode',
+        year: 2015,
+        grandparentTitle: show,
+        parentIndex: 1,
+        itemIndex: 1,
+        fileSize,
+      });
+    for (const [show, fileSize] of [
       ['Powers', 101],
       ['Superstore', 102],
       ['Ballers', 103],
       ['Krypton', 104],
       ['Insatiable', 105],
     ] as const) {
-      await createTestLibraryItem({
-        serverId: server.id,
-        title: 'Pilot',
-        mediaType: 'episode',
-        year: 2015,
-        grandparentTitle: showTitle,
-        parentIndex: 1,
-        itemIndex: 1,
-        fileSize: size,
-      });
+      await pilot(show, fileSize);
     }
+    await pilot('Powers', 99);
 
     const app = await buildApp(ownerUser());
-    const body = await requestDuplicates(app, [server.id], '', true);
-
-    expect(body.summary.totalGroups).toBe(0);
-  });
-
-  it('still fuzzy-matches duplicate listings of the same episode and show', async () => {
-    const server = await createTestServer();
-    for (const size of [101, 99]) {
-      await createTestLibraryItem({
-        serverId: server.id,
-        title: 'Pilot',
-        mediaType: 'episode',
-        year: 2015,
-        grandparentTitle: 'Powers',
-        parentIndex: 1,
-        itemIndex: 1,
-        fileSize: size,
-      });
-    }
-
-    const app = await buildApp(ownerUser());
-    const body = await requestDuplicates(app, [server.id], '', true);
+    const body = await requestDuplicates(app, [server.id], '&minConfidence=60', true);
 
     expect(body.summary.totalGroups).toBe(1);
-    expect(body.duplicates[0]!.matchType).toBe('fuzzy');
-    expect(body.duplicates[0]!.items).toHaveLength(2);
+    expect(body.duplicates[0]?.matchType).toBe('fuzzy');
+    expect(body.duplicates[0]?.items).toHaveLength(2);
   });
 
   it('orders by reclaimable bytes and sums the summary over all groups', async () => {
