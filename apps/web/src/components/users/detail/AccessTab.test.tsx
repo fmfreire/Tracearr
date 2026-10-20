@@ -10,6 +10,9 @@ vi.mock('react-i18next', () => ({
 vi.mock('@/components/users/UserAccessControls', () => ({
   UserAccessControls: () => <p>access controls</p>,
 }));
+vi.mock('@/components/users/MembershipControls', () => ({
+  MembershipControls: () => <p>membership controls</p>,
+}));
 vi.mock('@/hooks/useServerColorMap', () => ({ useServerColorMap: () => new Map() }));
 
 const account = {

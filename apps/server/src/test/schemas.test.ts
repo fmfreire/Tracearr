@@ -16,7 +16,6 @@ import {
   violationQuerySchema,
   violationIdParamSchema,
   terminateSessionBodySchema,
-  updateSettingsSchema,
   updateUserIdentitySchema,
 } from '@tracearr/shared';
 import { randomUUID } from 'node:crypto';
