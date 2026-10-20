@@ -817,22 +817,36 @@
     {
       "idx": 116,
       "version": "7",
-      "when": 1792099541032,
-      "tag": "0116_membership_enforcement",
+      "when": 1792420766352,
+      "tag": "0116_known_tomorrow_man",
       "breakpoints": true
     },
     {
       "idx": 117,
       "version": "7",
-      "when": 1792158000000,
-      "tag": "0117_membership_automation_identity",
+      "when": 1792099541032,
+      "tag": "0117_membership_enforcement",
       "breakpoints": true
     },
     {
       "idx": 118,
       "version": "7",
+      "when": 1792158000000,
+      "tag": "0118_membership_automation_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
       "when": 1792166400000,
-      "tag": "0118_membership_type_date_status",
+      "tag": "0119_membership_type_date_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792466346089,
+      "tag": "0120_membership_migration_compatibility",
       "breakpoints": true
     }
   ]
