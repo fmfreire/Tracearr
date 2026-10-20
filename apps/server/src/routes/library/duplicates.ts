@@ -214,7 +214,7 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
             FROM scoped a
             JOIN scoped b ON a.id < b.id
               AND a.media_type = b.media_type
-              AND a.year = b.year
+              AND (a.year = b.year OR (a.year IS NULL AND b.year IS NULL) OR a.media_type = 'episode')
               AND a.episode_key = b.episode_key
             WHERE a.imdb_id IS NULL AND a.tmdb_id IS NULL AND a.tvdb_id IS NULL
               AND b.imdb_id IS NULL AND b.tmdb_id IS NULL AND b.tvdb_id IS NULL
