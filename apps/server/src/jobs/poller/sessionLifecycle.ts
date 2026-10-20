@@ -586,8 +586,10 @@ export function deviceKeyOf(session: {
   deviceId?: string | null;
   playerName?: string | null;
 }): { column: 'deviceId' | 'playerName'; value: string } | null {
-  if (session.deviceId) return { column: 'deviceId', value: session.deviceId };
-  if (session.playerName) return { column: 'playerName', value: session.playerName };
+  const dId = session.deviceId?.trim();
+  if (dId) return { column: 'deviceId', value: dId };
+  const pName = session.playerName?.trim();
+  if (pName) return { column: 'playerName', value: pName };
   return null;
 }
 
