@@ -332,6 +332,39 @@ describe('GET /library/duplicates (real SQL)', () => {
     expect(body.duplicates[0]?.items).toHaveLength(2);
   });
 
+  it('never fuzzy-matches tracks across artists or albums', async () => {
+    const server = await createTestServer();
+    const track = (
+      artist: string,
+      album: string,
+      fileSize: number,
+      title = 'Intro'
+    ) =>
+      createTestLibraryItem({
+        serverId: server.id,
+        title,
+        mediaType: 'track',
+        year: null,
+        grandparentTitle: artist,
+        parentTitle: album,
+        fileSize,
+      });
+
+    await track('The Notorious B.I.G.', 'Ready to Die', 100);
+    await track('The Notorious B.I.G.', 'Ready to Die', 90);
+    await track('The Notorious B.I.G.', 'Born Again', 80);
+    await track('Pitbull', 'El Mariel', 70);
+    await track('50 Cent', 'Curtis', 60);
+
+    const app = await buildApp(ownerUser());
+    const body = await requestDuplicates(app, [server.id], '&minConfidence=60', true);
+
+    expect(body.summary.totalGroups).toBe(1);
+    expect(body.duplicates[0]?.matchType).toBe('fuzzy');
+    expect(body.duplicates[0]?.items).toHaveLength(2);
+    expect(body.duplicates[0]?.items.map((item) => item.title)).toEqual(['Intro', 'Intro']);
+  });
+
   it('orders by reclaimable bytes and sums the summary over all groups', async () => {
     const server = await createTestServer();
     const seedVersionPair = async (sizes: [number, number]) => {
