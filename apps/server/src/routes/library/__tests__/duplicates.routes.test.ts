@@ -256,6 +256,17 @@ describe('GET /library/duplicates', () => {
     expect(queryText).toContain('similarity(a.grandparent_title, b.grandparent_title) >= 0.6');
   });
 
+  it('uses artist and album identity when fuzzy matching tracks', async () => {
+    mockQueries({ groups: [] });
+
+    await requestDuplicates(app, '', true);
+
+    const query = vi.mocked(db.execute).mock.calls[0]?.[0] as SQL;
+    const { sql: queryText } = new PgDialect().sqlToQuery(query);
+    expect(queryText).toContain("a.grandparent_title || ' / ' || a.parent_title || ' / ' || a.title");
+    expect(queryText).toContain('similarity(a.parent_title, b.parent_title) >= 0.6');
+  });
+
   it('refetches the summary when the requested page is past the end', async () => {
     const execute = vi.mocked(db.execute);
     // Page 3 query: empty. Fallback page-1 query: one group carrying the summary.

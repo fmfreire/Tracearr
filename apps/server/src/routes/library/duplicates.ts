@@ -188,7 +188,7 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
         const result = await db.execute(sql`
           WITH scoped AS (
             SELECT id, server_id, media_type, title, grandparent_title, year,
-                   imdb_id, tmdb_id, tvdb_id, file_size, video_resolution,
+                   parent_title, imdb_id, tmdb_id, tvdb_id, file_size, video_resolution,
                    CASE
                      WHEN media_type = 'episode' AND parent_index IS NOT NULL AND item_index IS NOT NULL
                        THEN ':s' || parent_index || 'e' || item_index
@@ -204,9 +204,11 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
             ${
               fuzzyEnabled
                 ? sql`
-            SELECT a.id AS item_a_id, b.id AS item_b_id,
+            SELECT a.id AS item_a_id, b.id AS item_b_id, a.media_type AS media_type_a,
                    CASE WHEN a.media_type = 'episode'
                      THEN a.grandparent_title || ' ' || a.title
+                     WHEN a.media_type = 'track'
+                       THEN a.grandparent_title || ' / ' || a.parent_title || ' / ' || a.title
                      ELSE a.title
                    END AS title_a,
                    a.episode_key AS episode_key_a,
@@ -227,10 +229,21 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
                   AND similarity(a.grandparent_title, b.grandparent_title) >= 0.6
                 )
               )
+              AND (
+                a.media_type != 'track'
+                OR (
+                  a.grandparent_title IS NOT NULL
+                  AND b.grandparent_title IS NOT NULL
+                  AND a.parent_title IS NOT NULL
+                  AND b.parent_title IS NOT NULL
+                  AND similarity(a.grandparent_title, b.grandparent_title) >= 0.6
+                  AND similarity(a.parent_title, b.parent_title) >= 0.6
+                )
+              )
             ORDER BY confidence DESC
             LIMIT 100`
                 : sql`
-            SELECT NULL::uuid AS item_a_id, NULL::uuid AS item_b_id,
+            SELECT NULL::uuid AS item_a_id, NULL::uuid AS item_b_id, NULL::text AS media_type_a,
                    NULL::text AS title_a, NULL::text AS episode_key_a,
                    NULL::int AS confidence
             WHERE false`
@@ -239,11 +252,16 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
           fuzzy_keys AS (
             SELECT item_id, MIN(fuzzy_key) AS fuzzy_key, MAX(confidence) AS confidence
             FROM (
-              SELECT item_a_id AS item_id,
-                     'fuzzy:' || lower(left(title_a, 50)) || episode_key_a AS fuzzy_key, confidence
+              SELECT item_a_id AS item_id, CASE WHEN media_type_a = 'track'
+                       THEN 'fuzzy:' || lower(title_a) || episode_key_a
+                       ELSE 'fuzzy:' || lower(left(title_a, 50)) || episode_key_a
+                     END AS fuzzy_key, confidence
               FROM fuzzy_pairs
               UNION ALL
-              SELECT item_b_id, 'fuzzy:' || lower(left(title_a, 50)) || episode_key_a, confidence
+              SELECT item_b_id, CASE WHEN media_type_a = 'track'
+                       THEN 'fuzzy:' || lower(title_a) || episode_key_a
+                       ELSE 'fuzzy:' || lower(left(title_a, 50)) || episode_key_a
+                     END, confidence
               FROM fuzzy_pairs
             ) fp
             GROUP BY item_id

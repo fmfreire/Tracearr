@@ -22,6 +22,7 @@ export interface LibraryItemData {
   tmdbId?: number | null;
   tvdbId?: number | null;
   grandparentTitle?: string | null;
+  parentTitle?: string | null;
   grandparentRatingKey?: string | null;
   parentRatingKey?: string | null;
   parentIndex?: number | null;
@@ -68,6 +69,7 @@ export function buildLibraryItem(data: LibraryItemData): Required<LibraryItemDat
     tmdbId: data.tmdbId ?? null,
     tvdbId: data.tvdbId ?? null,
     grandparentTitle: data.grandparentTitle ?? null,
+    parentTitle: data.parentTitle ?? null,
     grandparentRatingKey: data.grandparentRatingKey ?? null,
     parentRatingKey: data.parentRatingKey ?? null,
     parentIndex: data.parentIndex ?? null,
@@ -105,12 +107,12 @@ export async function createTestLibraryItem(
     INSERT INTO library_items
       (server_id, library_id, rating_key, title, media_type, year, imdb_id, tmdb_id, tvdb_id,
        grandparent_title, grandparent_rating_key, parent_rating_key, parent_index, item_index,
-       genres, media_id, removed_at,
+       parent_title, genres, media_id, removed_at,
        removed_source, first_seen_at, file_size, video_resolution, video_dynamic_range, created_at)
     VALUES ('${d.serverId}', '${esc(d.libraryId)}', '${esc(d.ratingKey)}', '${esc(d.title)}',
        '${d.mediaType}', ${num(d.year)}, ${str(d.imdbId)}, ${num(d.tmdbId)}, ${num(d.tvdbId)},
        ${str(d.grandparentTitle)}, ${str(d.grandparentRatingKey)}, ${str(d.parentRatingKey)},
-       ${num(d.parentIndex)}, ${num(d.itemIndex)}, ${genres}, ${d.mediaId === null ? 'NULL' : `'${d.mediaId}'`}, ${removedAt},
+       ${num(d.parentIndex)}, ${num(d.itemIndex)}, ${str(d.parentTitle)}, ${genres}, ${d.mediaId === null ? 'NULL' : `'${d.mediaId}'`}, ${removedAt},
        ${removedSource}, ${firstSeenAt}, ${fileSize}, ${videoResolution}, ${videoDynamicRange}, ${createdAt})
     RETURNING id, rating_key, server_id
   `);
