@@ -195,8 +195,8 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
       const runGroupQuery = async (offset: number) => {
         const result = await db.execute(sql`
           WITH scoped AS (
-            SELECT id, server_id, media_type, title, grandparent_title, parent_title, year,
-                   imdb_id, tmdb_id, tvdb_id, file_size, video_resolution,
+            SELECT id, server_id, media_type, title, grandparent_title, year,
+                   parent_title, imdb_id, tmdb_id, tvdb_id, file_size, video_resolution,
                    CASE
                      WHEN media_type = 'episode' AND parent_index IS NOT NULL AND item_index IS NOT NULL
                        THEN ':s' || parent_index || 'e' || item_index
@@ -216,13 +216,16 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
               ${mediaTypeFilter}
           ),
           fuzzy_pairs AS (
-            ${
-              fuzzyEnabled
-                ? sql`
-            SELECT a.id AS item_a_id, b.id AS item_b_id,
-                   'fuzzy:' || lower(left(COALESCE(a.grandparent_title, ''), 50)) || ':'
-                     || lower(left(COALESCE(a.parent_title, ''), 50)) || ':'
-                     || lower(left(a.title, 50)) || a.position_key AS fuzzy_key,
+            ${fuzzyEnabled
+            ? sql`
+            SELECT a.id AS item_a_id, b.id AS item_b_id, a.media_type AS media_type_a,
+                   CASE WHEN a.media_type = 'episode'
+                     THEN a.grandparent_title || ' ' || a.title
+                     WHEN a.media_type = 'track'
+                       THEN a.grandparent_title || ' / ' || a.parent_title || ' / ' || a.title
+                     ELSE a.title
+                   END AS title_a,
+                   a.episode_key AS episode_key_a,
                    ROUND(similarity(a.title, b.title) * 100)::int AS confidence
             FROM scoped a
             JOIN scoped b ON a.id < b.id
@@ -233,28 +236,48 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
             WHERE a.imdb_id IS NULL AND a.tmdb_id IS NULL AND a.tvdb_id IS NULL AND a.mbid IS NULL
               AND b.imdb_id IS NULL AND b.tmdb_id IS NULL AND b.tvdb_id IS NULL AND b.mbid IS NULL
               AND similarity(a.title, b.title) >= 0.6
-              -- generic episode titles (Pilot, Finale) recur across shows
-              AND (a.media_type <> 'episode'
-                   OR similarity(a.grandparent_title, b.grandparent_title) >= 0.6)
-              -- a standard and a deluxe edition are one album; Intro on two albums is not.
-              -- word_similarity scores Parklife inside Parklife (Deluxe Edition) at 1, similarity at 0.375
-              AND (a.media_type <> 'track'
-                   OR GREATEST(word_similarity(a.parent_title, b.parent_title),
-                               word_similarity(b.parent_title, a.parent_title)) >= 0.8)
+              AND (
+                a.media_type != 'episode'
+                OR (
+                  a.grandparent_title IS NOT NULL
+                  AND b.grandparent_title IS NOT NULL
+                  AND similarity(a.grandparent_title, b.grandparent_title) >= 0.6
+                )
+              )
+              AND (
+                a.media_type != 'track'
+                OR (
+                  a.grandparent_title IS NOT NULL
+                  AND b.grandparent_title IS NOT NULL
+                  AND a.parent_title IS NOT NULL
+                  AND b.parent_title IS NOT NULL
+                  AND similarity(a.grandparent_title, b.grandparent_title) >= 0.6
+                  AND similarity(a.parent_title, b.parent_title) >= 0.6
+                )
+              )
             ORDER BY confidence DESC
             LIMIT 100`
-                : sql`
-            SELECT NULL::uuid AS item_a_id, NULL::uuid AS item_b_id,
-                   NULL::text AS fuzzy_key, NULL::int AS confidence
+            : sql`
+            SELECT NULL::uuid AS item_a_id, NULL::uuid AS item_b_id, NULL::text AS media_type_a,
+                   NULL::text AS title_a, NULL::text AS episode_key_a,
+                   NULL::int AS confidence
             WHERE false`
-            }
+          }
           ),
           fuzzy_keys AS (
             SELECT item_id, MIN(fuzzy_key) AS fuzzy_key, MAX(confidence) AS confidence
             FROM (
-              SELECT item_a_id AS item_id, fuzzy_key, confidence FROM fuzzy_pairs
+              SELECT item_a_id AS item_id, CASE WHEN media_type_a = 'track'
+                       THEN 'fuzzy:' || lower(title_a) || episode_key_a
+                       ELSE 'fuzzy:' || lower(left(title_a, 50)) || episode_key_a
+                     END AS fuzzy_key, confidence
+              FROM fuzzy_pairs
               UNION ALL
-              SELECT item_b_id, fuzzy_key, confidence FROM fuzzy_pairs
+              SELECT item_b_id, CASE WHEN media_type_a = 'track'
+                       THEN 'fuzzy:' || lower(title_a) || episode_key_a
+                       ELSE 'fuzzy:' || lower(left(title_a, 50)) || episode_key_a
+                     END, confidence
+              FROM fuzzy_pairs
             ) fp
             GROUP BY item_id
           ),
@@ -288,8 +311,8 @@ export const libraryDuplicatesRoute: FastifyPluginAsync = async (app) => {
             SELECT m.group_key, m.key_type, m.fuzzy_confidence, m.id, m.server_id,
               CASE WHEN v.id IS NULL THEN m.file_size ELSE v.file_size END AS size,
               ${resolutionRankSql(
-                'CASE WHEN v.id IS NULL THEN m.video_resolution ELSE v.video_resolution END'
-              )} AS res_rank
+            'CASE WHEN v.id IS NULL THEN m.video_resolution ELSE v.video_resolution END'
+          )} AS res_rank
             FROM membership m
             LEFT JOIN library_item_versions v
               ON v.library_item_id = m.id AND v.removed_at IS NULL
