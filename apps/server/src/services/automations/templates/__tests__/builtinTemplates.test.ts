@@ -55,7 +55,6 @@ const TABLE: Array<[string, string, string]> = [
   ['paused-too-long', 'notifications', 'notification'],
   ['media-added', 'notifications', 'notification'],
   ['media-upgraded', 'notifications', 'notification'],
-  ['membership-enforcement', 'policies', 'policy'],
   ['new-device', 'notifications', 'notification'],
   ['trust-score-changed', 'notifications', 'notification'],
   ['newsletter-failed', 'notifications', 'notification'],
@@ -70,12 +69,13 @@ const TABLE: Array<[string, string, string]> = [
   ['device-velocity', 'policies', 'policy'],
   ['geo-restriction', 'policies', 'policy'],
   ['account-inactivity', 'policies', 'policy'],
+  ['download-burst', 'policies', 'policy'],
   ['no-4k-transcodes', 'policies', 'policy'],
   ['kill-paused-streams', 'housekeeping', 'notification'],
 ];
 
 describe('builtin template envelopes', () => {
-  it('bundles the built-in templates in their catalog order', () => {
+  it('bundles the twenty-three templates the design names, in its order', () => {
     expect(BUILTIN_ENVELOPES.map((envelope) => envelope.slug)).toEqual(TABLE.map(([slug]) => slug));
   });
 

@@ -54,15 +54,12 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
 
     const resolvedIds = resolveServerIds(authUser, serverId, serverIds);
     const serverFilter = scopedServerFragment(resolvedIds, await viewScope(request));
-    // Note: The continuous aggregate buckets by UTC day, so we truncate input dates
-    // to UTC day boundaries to ensure correct bucket matching
+    // The aggregate buckets by UTC day: the start truncates to its bucket, and the exclusive
+    // end keeps every bucket that starts before it
     const dailyStartFilter = dateRange.start
       ? sql`day >= date_trunc('day', ${dateRange.start}::timestamptz)`
       : sql`true`;
-    const dailyEndFilter =
-      period === 'custom'
-        ? sql`AND day < date_trunc('day', ${dateRange.end}::timestamptz) + interval '1 day'`
-        : sql``;
+    const dailyEndFilter = period === 'custom' ? sql`AND day < ${dateRange.end}` : sql``;
     const mediaTypeFilter = mediaType ? sql`AND media_type = ${mediaType}` : sql``;
 
     // Run combined + shows queries in parallel (2 instead of 5)
@@ -562,16 +559,12 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
     // For date filtering, aggregate from daily_content_engagement directly. A member always
     // takes this branch: top_shows_by_engagement has no server_user_id to scope by.
     if (dateRange.start || scope !== 'all') {
-      // Build date filters for the day column in daily_content_engagement
-      // Note: The continuous aggregate buckets by UTC day, so we truncate input dates
-      // to UTC day boundaries to ensure correct bucket matching
+      // Same bucket rule as the engagement route above
       const dailyStartFilter = dateRange.start
         ? sql`day >= date_trunc('day', ${dateRange.start}::timestamptz)`
         : sql`true`;
       const dailyEndFilter =
-        period === 'custom' && dateRange.end
-          ? sql`AND day <= date_trunc('day', ${dateRange.end}::timestamptz)`
-          : sql``;
+        period === 'custom' && dateRange.end ? sql`AND day < ${dateRange.end}` : sql``;
 
       const result = await db.execute(sql`
         WITH filtered_daily AS (
@@ -628,10 +621,11 @@ export const engagementRoutes: FastifyPluginAsync = async (app) => {
             SUM(total_session_count) AS total_sessions,
             MAX(content_duration_ms) AS content_duration_ms,
             CASE
-              WHEN SUM(watched_ms) >= MAX(content_duration_ms) * 1.5 THEN 'rewatched'
-              WHEN SUM(watched_ms) >= MAX(content_duration_ms) * 0.9 THEN 'finished'
-              WHEN SUM(watched_ms) >= MAX(content_duration_ms) * 0.7 THEN 'completed'
-              WHEN SUM(watched_ms) >= MAX(content_duration_ms) * 0.25 THEN 'engaged'
+              WHEN SUM(watched_ms) >= MAX(content_duration_ms) * 2.0 THEN 'rewatched'
+              WHEN COALESCE(MAX(max_progress_ms), 0) >= MAX(content_duration_ms) * 0.85 THEN 'watched'
+              WHEN SUM(watched_ms) >= MAX(content_duration_ms) * 0.85 THEN 'watched'
+              WHEN GREATEST(COALESCE(MAX(max_progress_ms), 0), SUM(watched_ms)) >= MAX(content_duration_ms) * 0.5 THEN 'engaged'
+              WHEN GREATEST(COALESCE(MAX(max_progress_ms), 0), SUM(watched_ms)) >= MAX(content_duration_ms) * 0.2 THEN 'sampled'
               WHEN SUM(valid_session_count) >= 1 THEN 'sampled'
               ELSE 'abandoned'
             END AS engagement_tier

@@ -141,6 +141,18 @@ export const REDIS_KEYS = {
     `${_redisPrefix}tracearr:servers:${serverId}:stats:bandwidth`,
   SERVER_STATS_SAMPLES: (serverId: string) =>
     `${_redisPrefix}tracearr:servers:${serverId}:stats:samples`,
+  DOWNLOAD_CURSOR: (serverId: string) =>
+    `${_redisPrefix}tracearr:servers:${serverId}:downloads:cursor`,
+  SYNC_CURSOR: (serverId: string) =>
+    `${_redisPrefix}tracearr:servers:${serverId}:downloads:sync-cursor`,
+  SYNC_RECORDED: (serverId: string) =>
+    `${_redisPrefix}tracearr:servers:${serverId}:downloads:sync-recorded`,
+  TRANSCODE_PULLS: (serverId: string) =>
+    `${_redisPrefix}tracearr:servers:${serverId}:downloads:transcode-pulls`,
+  PLEX_DEVICE: (serverId: string, clientIdentifier: string) =>
+    `${_redisPrefix}tracearr:servers:${serverId}:plex-device:${clientIdentifier}`,
+  EMBY_USER_GUID: (serverId: string, numericId: string) =>
+    `${_redisPrefix}tracearr:servers:${serverId}:emby-user:${numericId}`,
   get PUBSUB_EVENTS() {
     return `${_redisPrefix}tracearr:events`;
   },
@@ -207,9 +219,6 @@ export const REDIS_KEYS = {
   get LIBRARY_PATTERNS() {
     return `${_redisPrefix}tracearr:library:patterns`;
   },
-  get LIBRARY_COMPLETION() {
-    return `${_redisPrefix}tracearr:library:completion`;
-  },
   get LIBRARY_TOP_MOVIES() {
     return `${_redisPrefix}tracearr:library:top-movies`;
   },
@@ -265,6 +274,15 @@ export const REDIS_KEYS = {
   // net is time-based so event-sync bursts can't drag it forward
   LIBRARY_SYNC_FULL_SCAN_AT: (serverId: string, libraryId: string) =>
     `${_redisPrefix}tracearr:library:sync:fullscan:${serverId}:${libraryId}`,
+  // When a full scan of the library last completed. Unlike LIBRARY_SYNC_FULL_SCAN_AT, which an
+  // incremental sync seeds for the full-scan-due clock, this is written by a full scan only, so
+  // it says a rating key absent from the library was absent from the server at that time
+  LIBRARY_SYNC_FULL_SCAN_DONE: (serverId: string, libraryId: string) =>
+    `${_redisPrefix}tracearr:library:sync:fullscan-done:${serverId}:${libraryId}`,
+  // The floor (earliest completed-scan marker across the server's libraries) the sync tail last
+  // handled tracked plays on gone rating keys for; the tail looks again only once it advances
+  LIBRARY_SYNC_GONE_KEYS_HANDLED: (serverId: string) =>
+    `${_redisPrefix}tracearr:library:sync:gonekeys-handled:${serverId}`,
   // Accepted structural shortfall from the last full scan - see COUNT_MISMATCH_* in librarySync.ts
   LIBRARY_SYNC_SHORTFALL: (serverId: string, libraryId: string) =>
     `${_redisPrefix}tracearr:library:sync:shortfall:${serverId}:${libraryId}`,
@@ -337,6 +355,13 @@ export const REDIS_KEYS = {
   // Filter options caching
   FILTER_OPTIONS: (userId: string, scopeHash: string) =>
     `${_redisPrefix}tracearr:filter-options:v2:${userId}:${scopeHash}`,
+  // History totals for one filter set
+  HISTORY_AGGREGATES: (scopeHash: string) =>
+    `${_redisPrefix}tracearr:history-aggregates:v2:${scopeHash}`,
+  // Distinct-IP check behind the Settings IP warning
+  get IP_WARNING() {
+    return `${_redisPrefix}tracearr:settings:ip-warning`;
+  },
   // A member's non-removed server account ids and their servers
   USER_SCOPE: (userId: string) => `${_redisPrefix}tracearr:scope:${userId}`,
   // v1 segment invalidates cached entries if the GeoLocation shape ever changes
@@ -381,7 +406,6 @@ export const CACHE_TTL = {
   LIBRARY_WATCH: 300, // 5 minutes
   LIBRARY_ROI: 3600, // 1 hour (ROI changes slowly)
   LIBRARY_PATTERNS: 3600, // 1 hour (patterns change slowly)
-  LIBRARY_COMPLETION: 300, // 5 minutes
   LIBRARY_TOP_MOVIES: 300, // 5 minutes
   LIBRARY_TOP_SHOWS: 300, // 5 minutes
   LIBRARY_CODECS: 300, // 5 minutes
@@ -399,6 +423,8 @@ export const CACHE_TTL = {
   PUSH_SESSIONS_SYNC: 1200,
   // Filter options (dropdown values change infrequently)
   FILTER_OPTIONS: 120, // 2 minutes
+  HISTORY_AGGREGATES: 60, // 1 minute, the web app's own staleTime for the totals
+  IP_WARNING: 300, // 5 minutes
   PLEX_GEOIP: 86400,
   // Fail-open: short negative cache keeps a down plex.tv from being hit every poll tick
   PLEX_GEOIP_NEGATIVE: 600,

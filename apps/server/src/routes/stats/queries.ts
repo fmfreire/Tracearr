@@ -21,11 +21,8 @@ import {
   type QualityStats,
 } from '@tracearr/shared';
 import { db } from '../../db/client.js';
-import {
-  countedSessionSql,
-  MEDIA_TYPE_SQL_FILTER,
-  PLAYS_MEDIA_TYPE_SQL_FILTER,
-} from '../../constants/index.js';
+import { MEDIA_TYPE_SQL_FILTER, PLAYS_MEDIA_TYPE_SQL_FILTER } from '../../constants/index.js';
+import { countedSessionSql } from '../../db/sessions/rules.js';
 import { playbackDecisionSql } from '../../utils/playbackDecisionSql.js';
 
 /** Movies and episodes only, unless the caller counts every media type like the plays aggregate. */
@@ -249,7 +246,7 @@ export async function queryConcurrentStreams(params: {
         ${MEDIA_TYPE_SQL_FILTER}
         ${serverFilter}
         AND stopped_at >= ${rangeStart}
-        AND started_at <= ${rangeEnd}
+        AND started_at < ${rangeEnd}
     ),
     events AS (
       SELECT started_at AS event_time,

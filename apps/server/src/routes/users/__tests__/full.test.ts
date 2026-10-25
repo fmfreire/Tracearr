@@ -13,7 +13,7 @@ import sensible from '@fastify/sensible';
 import { randomUUID } from 'node:crypto';
 import type { SQL } from 'drizzle-orm';
 import type { AuthUser } from '@tracearr/shared';
-import { queryChain, renderSql, renderedWheres } from '../../../test/helpers.js';
+import { queryChain, renderCall, renderSql, renderedWheres } from '../../../test/helpers.js';
 
 vi.mock('../../../db/client.js', () => ({
   db: { transaction: vi.fn() },
@@ -85,6 +85,53 @@ describe('GET /users/:id/full violations panel', () => {
       expect(where).toContain('automation_runs.outcome =');
       expect(where).toContain('automation_runs.dismissed_at is null');
     }
+  });
+
+  it('counts sessions for the identity in one grouped read instead of a count per row', async () => {
+    const serverUserId = randomUUID();
+    const siblingId = randomUUID();
+    const serverId = randomUUID();
+    app = await buildTestApp({
+      userId: randomUUID(),
+      username: 'owner',
+      role: 'owner',
+      serverIds: [serverId],
+    });
+
+    let selectCall = 0;
+    const tx = {
+      select: vi.fn(() => {
+        selectCall++;
+        const rows =
+          selectCall === 1
+            ? [{ id: serverUserId, serverId, userId: randomUUID() }]
+            : selectCall === 2
+              ? [
+                  { id: serverUserId, serverId },
+                  { id: siblingId, serverId },
+                ]
+              : selectCall === 3
+                ? [{ serverUserId: siblingId, count: 4 }]
+                : [];
+        const chain = queryChain(vi.fn, rows);
+        chains.push(chain);
+        return chain;
+      }),
+      execute: vi.fn(async () => ({ rows: [] })),
+    };
+    vi.mocked((db as any).transaction).mockImplementation(async (callback: any) => callback(tx));
+
+    const response = await app.inject({ method: 'GET', url: `/users/${serverUserId}/full` });
+
+    expect(response.statusCode).toBe(200);
+    const countChain = chains[2];
+    expect(renderCall(countChain).text).toBe(
+      `sessions.server_user_id = ANY(ARRAY['${serverUserId}'::uuid,'${siblingId}'::uuid]) AND sessions.started_at >= $1 AND sessions.started_at <= $2`
+    );
+    expect(countChain.groupBy).toHaveBeenCalledTimes(1);
+    expect(renderedWheres(chains).join(' ')).not.toContain('select count(*)::int from');
+    expect(response.json().user.sessionCount).toBe(0);
+    expect(response.json().identity.serverUsers.map((su: any) => su.sessionCount)).toEqual([0, 4]);
   });
 
   it('carries the identity contact email in the identity block', async () => {
@@ -177,6 +224,41 @@ describe('GET /users/:id/full violations panel', () => {
       expect.arrayContaining(['loginAccess', 'loginCount', 'lastLoginAt'])
     );
     expect(response.json().user).toMatchObject({ loginAccess: 'allow', loginCount: 7 });
+  });
+
+  it('bounds the recent-sessions join and the devices read by the page window', async () => {
+    const serverUserId = randomUUID();
+    app = await buildTestApp({
+      userId: randomUUID(),
+      username: 'owner',
+      role: 'owner',
+      serverIds: [],
+    });
+    let selectCall = 0;
+    const tx = {
+      select: vi.fn(() => {
+        selectCall++;
+        const rows =
+          selectCall === 1
+            ? [{ id: serverUserId, serverId: randomUUID(), userId: randomUUID() }]
+            : [];
+        return queryChain(vi.fn, rows);
+      }),
+      execute: vi.fn(async (_query: SQL) => ({ rows: [] })),
+    };
+    vi.mocked((db as any).transaction).mockImplementation(async (callback: any) => callback(tx));
+
+    await app.inject({ method: 'GET', url: `/users/${serverUserId}/full` });
+
+    const texts = tx.execute.mock.calls.map(([query]) => renderSql(query).sql.replace(/\s+/g, ' '));
+    const join = texts
+      .find((text) => text.includes('grouped_sessions'))
+      ?.match(/JOIN sessions s ON s\.id = gs\.first_session_id.*?JOIN servers/)?.[0];
+    expect(join).toMatch(/s\.started_at >= \$\d+/);
+    expect(join).toMatch(/s\.started_at <= \$\d+/);
+    expect(texts.find((text) => text.includes('device_id, player_name'))).toMatch(
+      /WHERE server_user_id = ANY\(.*\) AND started_at >= \$\d+ AND started_at < \$\d+/
+    );
   });
 
   it('returns the media ids on each recent session', async () => {

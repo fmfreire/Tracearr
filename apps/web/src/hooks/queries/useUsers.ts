@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
-  getClientTimezone,
   MERGE_SAME_SERVER_CONFIRMATION_REQUIRED,
   serverScopeFromIds,
   serverScopeKey,
@@ -12,6 +11,7 @@ import {
   type UserRosterFilters,
 } from '@tracearr/shared';
 import { api, type StatsTimeRange, type UserListParams } from '@/lib/api';
+import { browserTimeZone } from '@/lib/dateFormat';
 
 export function useUsers(params: UserListParams = {}, options: { enabled?: boolean } = {}) {
   const serverIdsKey = serverScopeKey(serverScopeFromIds(params.serverIds));
@@ -53,7 +53,7 @@ export function useUserRangeStats(
   params: { scope?: 'identity' } & StatsTimeRange,
   serverIds: string[]
 ) {
-  const timezone = getClientTimezone();
+  const timezone = browserTimeZone();
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   return useQuery({
     queryKey: ['users', 'range-stats', id, params, serverIdsKey, timezone],
@@ -72,6 +72,18 @@ export function useUserSessions(
     queryFn: () => api.users.sessions(id, params),
     enabled: !!id,
     staleTime: 1000 * 60, // 1 minute
+  });
+}
+
+export function useUserDownloads(
+  id: string,
+  params: { page?: number; pageSize?: number; scope?: 'identity' } = {}
+) {
+  return useQuery({
+    queryKey: ['users', 'downloads', id, params],
+    queryFn: () => api.users.downloads(id, params),
+    enabled: !!id,
+    staleTime: 1000 * 60,
   });
 }
 

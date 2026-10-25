@@ -276,7 +276,8 @@
       "viewAsHint": ""
     },
     "tabs": {
-      "access": ""
+      "access": "",
+      "downloads": ""
     },
     "cards": {
       "vsPrior": "",
@@ -521,14 +522,8 @@
         },
         "columns": {
           "hoursPerGb": "",
-          "value": ""
-        },
-        "category": {
-          "low": "",
-          "moderate": "",
-          "high": ""
-        },
-        "deletionSuggested": ""
+          "lastWatched": ""
+        }
       },
       "matchBadge": {
         "exact": "",
@@ -548,7 +543,7 @@
       "peakHour": "Heure du pic",
       "viewingHours": "Visualisation des heures",
       "peak": "Pic :",
-      "monthlyTrends": "Tendances mensuelles",
+      "viewingTrend": "",
       "busiest": "Mouvementé:",
       "quietest": "Silencieux:",
       "bingeHighlights": "Temps forts des marathons",
@@ -570,12 +565,6 @@
         "empty": {
           "title": "",
           "description": ""
-        },
-        "tiers": {
-          "highlyAddictive": "",
-          "addictive": "",
-          "bingeable": "",
-          "casual": ""
         }
       },
       "percentWatchedValue": "",
@@ -677,8 +666,7 @@
         "empty": {
           "title": "",
           "description": ""
-        },
-        "uniqueItems_other": ""
+        }
       },
       "growth": {
         "empty": {
@@ -847,6 +835,12 @@
         "platform": "",
         "product": "",
         "location": ""
+      },
+      "download": {
+        "title": "",
+        "app": "",
+        "device": "",
+        "last24h": ""
       },
       "trust": {
         "previous": "",
@@ -1281,6 +1275,7 @@
         "accountInactiveFor": "un compte est inactif depuis {{duration}}",
         "accountNewDevice": "un compte lance une lecture depuis un nouvel appareil",
         "accountTrustChanged": "changement de score de confiance d'un compte",
+        "accountMediaDownloaded": "",
         "mediaAdded": "média ajouté",
         "mediaUpgraded": "média mis à jour",
         "serverDown": "un serveur est en panne",
@@ -1309,6 +1304,8 @@
         "travel_speed_kmh": "la vitesse de déplacement",
         "unique_ips_in_window": "le nombre d'adresses IP",
         "unique_devices_in_window": "le nombre d'appareils",
+        "downloads_in_window": "",
+        "download_bytes_in_window": "",
         "inactive_days": "le temps écoulé depuis le dernier flux",
         "current_pause_minutes": "la pause en cours",
         "total_pause_minutes": "le temps total de pause",
@@ -1487,6 +1484,14 @@
         "description": ""
       },
       "unique_devices_in_window": {
+        "label": "",
+        "description": ""
+      },
+      "downloads_in_window": {
+        "label": "",
+        "description": ""
+      },
+      "download_bytes_in_window": {
         "label": "",
         "description": ""
       },
@@ -1882,6 +1887,11 @@
         "description": "",
         "keywords": ""
       },
+      "download-burst": {
+        "name": "",
+        "description": "",
+        "keywords": ""
+      },
       "geo-restriction": {
         "name": "",
         "description": "",
@@ -2044,6 +2054,10 @@
           "description": "",
           "synonyms": ""
         },
+        "accountMediaDownloaded": {
+          "description": "",
+          "synonyms": ""
+        },
         "mediaAdded": {
           "description": "",
           "synonyms": ""
@@ -2187,6 +2201,9 @@
         "authToken": "",
         "userKey": "",
         "apiToken": "",
+        "botToken": "",
+        "chatId": "",
+        "topicId": "",
         "preset": "",
         "host": "",
         "port": "",
@@ -2208,6 +2225,7 @@
       },
       "hints": {
         "authTokenOptional": "",
+        "telegramTopic": "",
         "smtpPreset": "",
         "smtpVerifyCertificate": "",
         "smtpUsernameOptional": "",
@@ -2265,6 +2283,7 @@
         "gotify": "",
         "apprise": "",
         "pushover": "",
+        "telegram": "",
         "email": "",
         "push": "",
         "webToast": ""
@@ -2327,7 +2346,23 @@
     "loadingData": "",
     "noDataForFilters": "",
     "totalStreams": "",
-    "streamCount_other": ""
+    "byStreams": "",
+    "noMapPosition": "",
+    "allLocations": "",
+    "people": "",
+    "devices": "",
+    "latestStreams": "",
+    "firstSeen": "",
+    "lastSeen": "",
+    "areaName": "",
+    "areaPlaces": "",
+    "noneInView": "",
+    "showAll": "",
+    "streamCount_other": "",
+    "peopleCount_other": "",
+    "viewInHistory_other": "",
+    "streamsAcrossPlaces_other": "",
+    "inViewCount_other": ""
   },
   "devices": {
     "analyzedSessions": "Sessions analysées",
@@ -2352,6 +2387,19 @@
     "directPlayLow": "",
     "analyzedSessionsTooltip_one": "",
     "analyzedSessionsTooltip_other": "Sessions correspondant à des combinaisons « appareil + codec » comportant au moins {{count}} sessions et dont le codec est connu. Les combinaisons rares et les sessions pour lesquelles aucune information sur le codec n'est disponible ne sont pas prises en compte."
+  },
+  "downloads": {
+    "dataDownloaded": "",
+    "peopleDownloading": "",
+    "mostDownloaded": "",
+    "unknownUser": "",
+    "appOnDevice": "",
+    "deliveredAs": "",
+    "deliveredAsFormat": "",
+    "deliveredAtBitrate": "",
+    "empty": "",
+    "panelTitle": "",
+    "requests_other": ""
   },
   "statsBandwidth": {
     "dataTransferred": "Données transférées",

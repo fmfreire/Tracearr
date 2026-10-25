@@ -9,6 +9,7 @@ import type { RunFinishedEvent, ViolationWithDetails } from '@tracearr/shared';
 import { WS_EVENTS } from '@tracearr/shared';
 import { db } from '../../db/client.js';
 import { servers, serverUsers, sessions, users } from '../../db/schema.js';
+import { sessionRowById } from '../../db/sessions/row.js';
 import type { automationRuns } from '../../db/schema.js';
 import { publishRunFinished, runFinishedOf } from '../../services/automations/runRecorder.js';
 import type { PubSubService } from '../../services/cache.js';
@@ -40,12 +41,12 @@ export interface ViolationInsertResult {
  * Call this AFTER the transaction to ensure data is persisted before broadcasting.
  *
  * @param violationResults - Array of violation insert results
- * @param subject - Session id, or { serverUserId } for violations that have no session
+ * @param subject - The session, or { serverUserId } for violations that have no session
  * @param pubSubService - PubSub service for WebSocket broadcast
  */
 export async function broadcastViolations(
   violationResults: ViolationInsertResult[],
-  subject: string | { serverUserId: string },
+  subject: Pick<typeof sessions.$inferSelect, 'id' | 'startedAt'> | { serverUserId: string },
   pubSubService: Pick<PubSubService, 'publish'> | null
 ): Promise<void> {
   if (!pubSubService || violationResults.length === 0) return;
@@ -61,14 +62,14 @@ export async function broadcastViolations(
     serverType: servers.type,
   };
   const [details] =
-    typeof subject === 'string'
+    'id' in subject
       ? await db
           .select(detailFields)
           .from(sessions)
           .innerJoin(serverUsers, eq(serverUsers.id, sessions.serverUserId))
           .innerJoin(users, eq(serverUsers.userId, users.id))
           .innerJoin(servers, eq(servers.id, sessions.serverId))
-          .where(eq(sessions.id, subject))
+          .where(sessionRowById(subject))
           .limit(1)
       : await db
           .select(detailFields)

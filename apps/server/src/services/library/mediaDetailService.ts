@@ -10,12 +10,13 @@
 
 import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import type { WatchedState } from '@tracearr/shared';
-import { countedSessionSql } from '../../constants/index.js';
+import { countedSessionSql } from '../../db/sessions/rules.js';
 import { db } from '../../db/client.js';
 import { media, servers } from '../../db/schema.js';
-import { buildMultiServerFragment } from '../../utils/serverFiltering.js';
+import { buildMultiServerFragment, serverIdCondition } from '../../utils/serverFiltering.js';
 import {
   libraryFragment,
+  scopeFragment,
   scopeSessionsRaw,
   scopedServerFragment,
   type Scope,
@@ -133,16 +134,6 @@ export function scopeSessionConditions(scope: MediaScope): SQL[] {
   return [sql`s.media_id IN (${idList(scope.aliases)})`];
 }
 
-/** Bare boolean condition (no leading AND) for use in a conditions[] array. */
-function buildServerAuthCondition(serverIds: string[] | undefined, columnRef: string): SQL | null {
-  if (serverIds === undefined) return null;
-  const col = sql.raw(columnRef);
-  if (serverIds.length === 0) return sql`false`;
-  if (serverIds.length === 1) return sql`${col} = ${serverIds[0]}`;
-  const ids = serverIds.map((id) => sql`${id}`);
-  return sql`${col} IN (${sql.join(ids, sql`, `)})`;
-}
-
 export interface AvailabilityRow {
   server_id: string;
   server_type: string;
@@ -185,8 +176,10 @@ export interface PosterCopy {
 }
 
 /**
- * Whether a member's library limit hides a title: it has copies on their servers and none of
- * them in a library they can open. A title with no copies at all stays reachable.
+ * Whether a member's library limit hides a title. Hidden when it has copies on their servers
+ * and none of them in a library they can open, and also when it has no copies anywhere
+ * (imported history of a title the library never held) unless one of the member's own
+ * accounts played it. Staff, and members without a library limit, see every title.
  */
 export async function hiddenByLibraryLimit(
   mediaId: string,
@@ -195,13 +188,20 @@ export async function hiddenByLibraryLimit(
 ): Promise<boolean> {
   if (scope === 'all' || Object.keys(scope.libraryIds ?? {}).length === 0) return false;
   const result = await db.execute(sql`
-    SELECT EXISTS (
+    SELECT (EXISTS (
         SELECT 1 FROM library_items li
         WHERE li.media_id = ${mediaId} ${buildMultiServerFragment(serverIds, 'li.server_id')}
       ) AND NOT EXISTS (
         SELECT 1 FROM library_items li
         WHERE li.media_id = ${mediaId} ${libraryFragment(serverIds, scope, 'li')}
-      ) AS hidden
+      )) OR (NOT EXISTS (
+        SELECT 1 FROM library_items li WHERE li.media_id = ${mediaId}
+      ) AND NOT EXISTS (
+        SELECT 1 FROM user_media_plays_daily p
+        WHERE (p.media_id IN (SELECT id FROM media WHERE id = ${mediaId} OR merged_into_id = ${mediaId})
+            OR p.show_media_id IN (SELECT id FROM media WHERE id = ${mediaId} OR merged_into_id = ${mediaId}))
+          ${scopeFragment(scope, sql`p.server_user_id`)}
+      )) AS hidden
   `);
   return (result.rows[0] as { hidden: boolean } | undefined)?.hidden === true;
 }
@@ -918,7 +918,7 @@ export async function getMediaHistoryPage(
 ): Promise<Awaited<ReturnType<typeof runHistoryPage>>> {
   const { scope, pageSize, cursorValue, serverIds, rowScope } = args;
   const conditions = scopeSessionConditions(scope);
-  const authCondition = buildServerAuthCondition(serverIds, 's.server_id');
+  const authCondition = serverIdCondition(serverIds, 's.server_id');
   if (authCondition) conditions.push(authCondition);
   const ownRows = scopeSessionsRaw(rowScope, sql`s.server_user_id`);
   if (ownRows) conditions.push(ownRows);

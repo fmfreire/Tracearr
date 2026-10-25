@@ -9,8 +9,9 @@
  * 5. Report progress via callback for real-time updates
  */
 
-import { eq, and, inArray, notInArray, sql, gte, lt, desc, isNull } from 'drizzle-orm';
+import { eq, and, inArray, notInArray, sql, gte, lt, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { latestSnapshotFor } from '../db/librarySnapshots.js';
 import {
   servers,
   libraryItems,
@@ -39,7 +40,12 @@ import {
 } from './library/mediaAnnounce.js';
 import {
   backfillSessionIdentityBatch,
+  fullScanFloors,
+  hasConfirmedAbsentTrackedRows,
   hasStampableSessionsBefore,
+  IDENTITY_PASSES_VERSION,
+  markGoneKeyFloorsHandled,
+  unhandledGoneKeyFloors,
 } from '../jobs/sessionIdentityBackfill.js';
 import { maybeEnqueueMaintenanceJob } from '../jobs/maintenanceQueue.js';
 import {
@@ -60,8 +66,10 @@ import { getHeavyOpsStatus } from '../jobs/heavyOpsLock.js';
 import { sanitizeText, scrubStringFields } from '../utils/sanitizeText.js';
 import {
   getImportedHistoryLinkState,
+  getSetting,
   getSettings,
   setImportedHistoryLinkState,
+  setSetting,
 } from './settings.js';
 import type { Redis } from 'ioredis';
 
@@ -147,27 +155,132 @@ function libraryScanVersionFor(_serverType: ServerType): number {
   return 4;
 }
 
-// Auto-handoff throttles for the compressed-history identity backfill. The
-// probe decompress-scans all compressed history when it comes back false (the
-// steady state - media_id is in neither segmentby nor orderby), so it must
-// not run on every event sync. New library items are what flips the probe
-// from false to true, so item-adding syncs probe freely; a daily allowance
-// catches the rarer flips (an existing item resolving media_id later). The
-// enqueue floor caps the retry loop when a walk keeps failing on a bad chunk
-// - one auto walk per floor interval, while the manual button stays
-// unthrottled. The floor gates the whole probe, not just the enqueue, so it
-// also delays post-success probing: a new item batch landing right after a
-// successful walk still waits out the floor before the next probe runs -
-// a latency trade-off, not a bug. Module-level state: resets on restart,
-// which just allows one extra probe/enqueue - acceptable.
+// Auto-handoff throttles for the compressed-history identity backfill. Only
+// an upserted library item can create identity work for the sessions under its
+// rating key, so the probe asks only about the keys upserted since it last
+// answered, per server. It runs at most once a day; a probe that finds work
+// but cannot queue the job (the queue is busy) spends nothing and keeps its
+// keys for the next sync. The enqueue floor caps the retry loop when a walk
+// keeps failing on a bad chunk - one auto walk per floor interval, while the
+// manual button stays unthrottled - and the failure count stops auto walks
+// altogether after MAX_AUTO_IDENTITY_ATTEMPTS in a row. Module-level state:
+// a restart drops the pending keys and allows one extra probe.
 const AUTO_BACKFILL_PROBE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const AUTO_BACKFILL_ENQUEUE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const MAX_AUTO_IDENTITY_ATTEMPTS = 5;
 let lastAutoBackfillProbeAt = 0;
 let lastAutoBackfillEnqueueAt = 0;
+const pendingProbeKeys = new Map<string, Set<string>>();
 
 export function _resetAutoBackfillThrottleForTests(): void {
   lastAutoBackfillProbeAt = 0;
   lastAutoBackfillEnqueueAt = 0;
+  pendingProbeKeys.clear();
+}
+
+/** True when some server's pending keys still have identity work below the horizon. */
+async function pendingKeysHaveIdentityWork(horizon: Date): Promise<boolean> {
+  for (const [serverId, keys] of pendingProbeKeys) {
+    if (await hasStampableSessionsBefore(horizon, serverId, [...keys])) return true;
+  }
+  return false;
+}
+
+/**
+ * Stamp identity onto sessions that predate their library item, at the tail of a library
+ * sync. One bounded batch over the uncompressed region, the plays rollup refreshed for the
+ * stamped days, and compressed history handed to the maintenance walk under the throttles
+ * above. Never runs while an import or maintenance
+ * job holds the heavy-ops lock: its walk may be updating the same session rows, and two
+ * unordered UPDATE ... FROM joins over them can deadlock. A failure here is logged, never
+ * thrown, so the caller's own follow-up work still runs.
+ */
+export async function stampPendingSessionIdentity(libraryChanged: boolean): Promise<void> {
+  if (await getHeavyOpsStatus()) return;
+  try {
+    // An upgrade that added a pass owes compressed history one walk, library change or not.
+    const passesPending = (await getSetting('identityPassesVersion')) < IDENTITY_PASSES_VERSION;
+    // A full scan that completed since the last tail can confirm rating keys gone, and the
+    // tracked plays on them resolve by title from here with no manual step. Each server's
+    // floor is handled once, so a row that cannot resolve costs one attempt per scan cycle.
+    const floors = await fullScanFloors();
+    const unhandledFloors = await unhandledGoneKeyFloors(floors);
+    const goneKeyRows = await hasConfirmedAbsentTrackedRows(unhandledFloors);
+    if (unhandledFloors.size > 0 && !goneKeyRows) await markGoneKeyFloorsHandled(unhandledFloors);
+    if (!libraryChanged && !passesPending && !goneKeyRows) return;
+    const horizon = await getSessionsCompressionHorizon();
+    const options = {
+      resolveImports: passesPending || goneKeyRows,
+      absentKeyFloors: unhandledFloors,
+    };
+    let repaired = await backfillSessionIdentityBatch(
+      10000,
+      horizon ? { start: horizon } : undefined,
+      undefined,
+      options
+    );
+    let updated = repaired.updated;
+    let oldest = repaired.oldest;
+    // With nothing compressed there is no walk to finish the job, so a full batch is followed
+    // from its cursor until one comes back short; the version below is stamped only then.
+    while (!horizon && repaired.examined >= 10000) {
+      repaired = await backfillSessionIdentityBatch(10000, undefined, repaired.cursor, options);
+      updated += repaired.updated;
+      if (repaired.oldest && (!oldest || repaired.oldest < oldest)) oldest = repaired.oldest;
+    }
+    if (updated > 0 && oldest) {
+      await refreshAggregates({ startTime: oldest, endTime: new Date() });
+    }
+    // Gone-key rows the inline batch could not reach are the walk's; the walk marks the
+    // floors it read when it completes, so a throttled or failed hand-off keeps them open.
+    const goneKeyWalkOwed =
+      goneKeyRows && !!horizon && (await hasConfirmedAbsentTrackedRows(unhandledFloors, horizon));
+    // Compressed history can't be stamped here (one sync-tail transaction
+    // must not decompress old chunks) - hand it to the maintenance walk
+    // instead of relying on someone finding the button. maybeEnqueue
+    // dedupes: the queue is single-flight, so a pending job already covers
+    // this. See the interval constants for the throttles.
+    const now = Date.now();
+    if (!horizon) {
+      pendingProbeKeys.clear();
+      if (passesPending) await setSetting('identityPassesVersion', IDENTITY_PASSES_VERSION);
+    } else if (
+      (passesPending || goneKeyWalkOwed) &&
+      now - lastAutoBackfillEnqueueAt >= AUTO_BACKFILL_ENQUEUE_INTERVAL_MS &&
+      (await getSetting('identityBackfillAutoAttempts')) < MAX_AUTO_IDENTITY_ATTEMPTS
+    ) {
+      if (
+        await maybeEnqueueMaintenanceJob('backfill_session_identity', 'system', {
+          trigger: 'auto',
+        })
+      ) {
+        lastAutoBackfillEnqueueAt = now;
+      }
+    } else if (
+      pendingProbeKeys.size > 0 &&
+      now - lastAutoBackfillEnqueueAt >= AUTO_BACKFILL_ENQUEUE_INTERVAL_MS &&
+      now - lastAutoBackfillProbeAt >= AUTO_BACKFILL_PROBE_INTERVAL_MS &&
+      (await getSetting('identityBackfillAutoAttempts')) < MAX_AUTO_IDENTITY_ATTEMPTS
+    ) {
+      if (!(await pendingKeysHaveIdentityWork(horizon))) {
+        lastAutoBackfillProbeAt = now;
+        pendingProbeKeys.clear();
+      } else if (
+        await maybeEnqueueMaintenanceJob('backfill_session_identity', 'system', {
+          trigger: 'auto',
+        })
+      ) {
+        lastAutoBackfillProbeAt = now;
+        lastAutoBackfillEnqueueAt = now;
+        pendingProbeKeys.clear();
+      }
+    }
+    if (goneKeyRows && !goneKeyWalkOwed && repaired.examined < 10000) {
+      await markGoneKeyFloorsHandled(unhandledFloors);
+    }
+  } catch (err) {
+    console.error('[LibrarySync] Session identity backfill failed, continuing sync:', err);
+  }
 }
 
 // The imported history link hand-off keeps its own throttle state on the same
@@ -311,10 +424,14 @@ export class SyncInterruptedError extends Error {}
 export type OnProgressCallback = (progress: LibrarySyncProgress) => void;
 
 /**
- * Helper to delay between batches (rate limiting)
+ * Rate limit between pages. The page's own fetch and write count toward the
+ * pause, so a server slower than the pause is not made to wait twice.
  */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function paceAfter(pageStartedAt: number, pauseMs: number): Promise<void> {
+  const remainingMs = pauseMs - (Date.now() - pageStartedAt);
+  return remainingMs > 0
+    ? new Promise((resolve) => setTimeout(resolve, remainingMs))
+    : Promise.resolve();
 }
 
 /**
@@ -588,40 +705,8 @@ export class LibrarySyncService {
     // Single bounded batch over the uncompressed region only - stamping compressed
     // history decompresses chunk segments and belongs to the maintenance backfill
     // job, not the tail of every sync (an unwindowed batch here is what OOM-crash-
-    // looped postgres in the field). Never let a backfill failure skip the
-    // reconcile/cache steps below - the item upserts above already succeeded.
-    try {
-      const horizon = await getSessionsCompressionHorizon();
-      const repaired = await backfillSessionIdentityBatch(
-        10000,
-        horizon ? { start: horizon } : undefined
-      );
-      if (repaired.updated > 0 && repaired.oldest) {
-        await refreshAggregates({ startTime: repaired.oldest, endTime: new Date() });
-      }
-      // Compressed history can't be stamped here (one sync-tail transaction
-      // must not decompress old chunks) - hand it to the maintenance walk
-      // instead of relying on someone finding the button. maybeEnqueue
-      // dedupes: the queue is single-flight, so a pending job already covers
-      // this. Both the probe and the enqueue are throttled (see the interval
-      // constants): the probe is expensive when it answers false, and a walk
-      // that keeps dying on one bad chunk would otherwise re-enqueue on every
-      // sync forever.
-      const addedItems = results.some((r) => r.itemsAdded > 0);
-      const now = Date.now();
-      const probeAllowed =
-        now - lastAutoBackfillEnqueueAt >= AUTO_BACKFILL_ENQUEUE_INTERVAL_MS &&
-        (addedItems || now - lastAutoBackfillProbeAt >= AUTO_BACKFILL_PROBE_INTERVAL_MS);
-      if (horizon && probeAllowed) {
-        lastAutoBackfillProbeAt = now;
-        if (await hasStampableSessionsBefore(horizon)) {
-          const enqueued = await maybeEnqueueMaintenanceJob('backfill_session_identity', 'system');
-          if (enqueued) lastAutoBackfillEnqueueAt = now;
-        }
-      }
-    } catch (err) {
-      console.error('[LibrarySync] Session identity backfill failed, continuing sync:', err);
-    }
+    // looped postgres in the field).
+    await stampPendingSessionIdentity(results.some((r) => r.itemsProcessed > 0));
 
     // Duplicate media rows can only appear when items were actually processed
     // (resolution runs per upserted batch, including updates), so idle syncs
@@ -852,13 +937,9 @@ export class LibrarySyncService {
           }
           console.log(`[LibrarySync] ${libraryName}: no changes since last sync, skipping`);
           const snapshot = await this.copyLastSnapshot(serverId, libraryId);
-          await this.saveSyncState(
-            serverId,
-            libraryId,
-            serverType,
-            totalCount,
-            syncState.lastFullScanAt ?? new Date()
-          );
+          await this.saveSyncState(serverId, libraryId, serverType, totalCount, {
+            at: syncState.lastFullScanAt ?? new Date(),
+          });
           return {
             serverId,
             libraryId,
@@ -888,6 +969,7 @@ export class LibrarySyncService {
         let totalSkippedEmpty = 0;
 
         for (let i = 0; i < combinedItems.length; i += BATCH_SIZE) {
+          const pageStartedAt = Date.now();
           const batch = combinedItems.slice(i, i + BATCH_SIZE);
           allItems.push(...batch);
           const { skippedEmpty } = await this.upsertItems(
@@ -900,7 +982,7 @@ export class LibrarySyncService {
           totalSkippedEmpty += skippedEmpty;
 
           if (i + BATCH_SIZE < combinedItems.length) {
-            await delay(BATCH_DELAY_MS_INCREMENTAL);
+            await paceAfter(pageStartedAt, BATCH_DELAY_MS_INCREMENTAL);
           }
         }
 
@@ -943,13 +1025,9 @@ export class LibrarySyncService {
           );
         }
 
-        await this.saveSyncState(
-          serverId,
-          libraryId,
-          serverType,
-          totalCount,
-          syncState.lastFullScanAt ?? new Date()
-        );
+        await this.saveSyncState(serverId, libraryId, serverType, totalCount, {
+          at: syncState.lastFullScanAt ?? new Date(),
+        });
 
         return {
           serverId,
@@ -998,11 +1076,16 @@ export class LibrarySyncService {
     };
     let totalSkippedEmpty = 0;
 
+    // The completed-scan marker carries this time: an item added while the scan runs may
+    // be listed or not, so only a play older than the scan's start is known to be absent.
+    const fullScanStartedAt = new Date();
+
     // Fetch items in batches with pagination
     let offset = 0;
     let processedItems = 0;
 
     while (offset < totalCount) {
+      const pageStartedAt = Date.now();
       const { items, rawCount } = await client.getLibraryItems(libraryId, {
         offset,
         limit: BATCH_SIZE,
@@ -1049,9 +1132,8 @@ export class LibrarySyncService {
         });
       }
 
-      // Rate limit between batches
       if (offset < totalCount) {
-        await delay(BATCH_DELAY_MS);
+        await paceAfter(pageStartedAt, BATCH_DELAY_MS);
       }
     }
 
@@ -1086,6 +1168,7 @@ export class LibrarySyncService {
       let listingProcessed = 0;
 
       while (listingOffset < listingCount) {
+        const pageStartedAt = Date.now();
         const { items: pageItems, rawCount } = await fetchPage({
           offset: listingOffset,
           limit: BATCH_SIZE,
@@ -1127,7 +1210,7 @@ export class LibrarySyncService {
         }
 
         if (listingOffset < listingCount) {
-          await delay(BATCH_DELAY_MS);
+          await paceAfter(pageStartedAt, BATCH_DELAY_MS);
         }
       }
 
@@ -1232,7 +1315,7 @@ export class LibrarySyncService {
         libraryId,
         serverType,
         totalCount,
-        new Date(),
+        { at: new Date(), startedAt: fullScanStartedAt },
         acceptedShortfall
       );
       return {
@@ -1272,7 +1355,7 @@ export class LibrarySyncService {
       libraryId,
       serverType,
       totalCount,
-      new Date(),
+      { at: new Date(), startedAt: fullScanStartedAt },
       acceptedShortfall
     );
 
@@ -1334,6 +1417,8 @@ export class LibrarySyncService {
    * lastFullScanAt is passed through on incremental saves (seeded to now when
    * absent, e.g. right after an upgrade from the cycle-counter scheme) and set
    * to now by the full-scan paths.
+   * A completed full scan (startedAt set) also records the marker the identity backfill trusts,
+   * stamped with the time the scan started listing.
    * acceptedShortfall is omitted unless a full scan just recomputed it, leaving the prior baseline in place.
    */
   private async saveSyncState(
@@ -1341,7 +1426,7 @@ export class LibrarySyncService {
     libraryId: string,
     serverType: ServerType,
     itemCount: number,
-    lastFullScanAt: Date,
+    fullScan: { at: Date; startedAt?: Date },
     acceptedShortfall?: number
   ): Promise<void> {
     if (!redisClient) return;
@@ -1363,7 +1448,7 @@ export class LibrarySyncService {
       ),
       redisClient.set(
         REDIS_KEYS.LIBRARY_SYNC_FULL_SCAN_AT(serverId, libraryId),
-        lastFullScanAt.toISOString(),
+        fullScan.at.toISOString(),
         'EX',
         SYNC_STATE_TTL
       ),
@@ -1374,6 +1459,16 @@ export class LibrarySyncService {
         SYNC_STATE_TTL
       ),
     ];
+    if (fullScan.startedAt) {
+      writes.push(
+        redisClient.set(
+          REDIS_KEYS.LIBRARY_SYNC_FULL_SCAN_DONE(serverId, libraryId),
+          fullScan.startedAt.toISOString(),
+          'EX',
+          SYNC_STATE_TTL
+        )
+      );
+    }
     if (acceptedShortfall !== undefined) {
       writes.push(
         redisClient.set(
@@ -1786,6 +1881,10 @@ export class LibrarySyncService {
       `);
     }
 
+    const probeKeys = pendingProbeKeys.get(serverId) ?? new Set<string>();
+    for (const item of uniqueItems) probeKeys.add(item.ratingKey);
+    pendingProbeKeys.set(serverId, probeKeys);
+
     const resolvedIds = uniqueItems.map((i) => mediaIdByRatingKey.get(i.ratingKey));
     if (touchedMediaIds) {
       for (const id of resolvedIds) if (id) touchedMediaIds.add(id);
@@ -1981,7 +2080,17 @@ export class LibrarySyncService {
       if (keys.every((k) => existing[k] === stats[k])) {
         return { id: existing.id };
       }
-      await db.update(librarySnapshots).set(stats).where(eq(librarySnapshots.id, existing.id));
+      // The day window it was found in, so only that chunk is opened
+      await db
+        .update(librarySnapshots)
+        .set(stats)
+        .where(
+          and(
+            eq(librarySnapshots.id, existing.id),
+            gte(librarySnapshots.snapshotTime, today),
+            lt(librarySnapshots.snapshotTime, tomorrow)
+          )
+        );
       return { id: existing.id };
     }
 
@@ -2125,15 +2234,7 @@ export class LibrarySyncService {
 
     if (existing) return { id: existing.id };
 
-    // Find the most recent snapshot for this library
-    const [latest] = await db
-      .select()
-      .from(librarySnapshots)
-      .where(
-        and(eq(librarySnapshots.serverId, serverId), eq(librarySnapshots.libraryId, libraryId))
-      )
-      .orderBy(desc(librarySnapshots.snapshotTime))
-      .limit(1);
+    const latest = await latestSnapshotFor(serverId, libraryId);
 
     if (!latest) return null;
 

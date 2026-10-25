@@ -12,12 +12,18 @@
  */
 
 import { SESSION_WRITE_RETRY, type PlexPlaySessionNotification } from '@tracearr/shared';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, type SQL } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../db/client.js';
 import { servers, serverUserExternalAliases, serverUsers, sessions, users } from '../db/schema.js';
+import {
+  ACTIVE_SESSION_CHUNK_BOUND_MS,
+  readSessionRow,
+  sessionRowById,
+} from '../db/sessions/row.js';
 import { getGeoIPSettings } from '../routes/settings.js';
 import type { CacheService, PubSubService } from '../services/cache.js';
+import { pollAllDownloads } from '../services/downloads/activityLogPoll.js';
 import { createMediaServerClient } from '../services/mediaServer/index.js';
 import { isLiveServer, liveServers } from '../services/liveServers.js';
 import { extractLiveUuid } from '../services/mediaServer/plex/plexUtils.js';
@@ -657,7 +663,7 @@ async function applySessionProgress(
         lastSeenAt: now, // Update for stale session detection
         watched,
       })
-      .where(and(eq(sessions.id, existingSession.id), isNull(sessions.stoppedAt)))
+      .where(and(sessionRowById(existingSession), isNull(sessions.stoppedAt)))
       .returning({ id: sessions.id });
 
     if (updateResult.length === 0) {
@@ -752,6 +758,10 @@ async function handleProgress(event: {
 async function handleReconciliation(): Promise<void> {
   sseLogger.debug('Triggering reconciliation poll');
   await triggerReconciliationPoll();
+  // Detached: a slow or unreachable media server must not hold up the sweep and retries
+  void pollAllDownloads().catch((error: unknown) => {
+    console.error('[SSEProcessor] Download poll failed:', error);
+  });
 
   // Run maintenance tasks during reconciliation
   await sweepOrphanedPendingSessions();
@@ -859,13 +869,23 @@ async function processSessionWriteRetries(): Promise<void> {
         continue;
       }
 
-      // Attempt to find the session
-      const session = await db
-        .select()
-        .from(sessions)
-        .where(and(eq(sessions.id, retry.sessionId), isNull(sessions.stoppedAt)))
-        .limit(1)
-        .then((rows) => rows[0]);
+      const readOpen = (where: SQL) =>
+        db
+          .select()
+          .from(sessions)
+          .where(and(where, isNull(sessions.stoppedAt)))
+          .limit(1)
+          .then((rows) => rows[0]);
+      // A retry queued before starts were carried floors at the active bound first, and only
+      // a stream older than that falls back to the id alone.
+      const session =
+        retry.startedAt === undefined
+          ? await readSessionRow(
+              retry.sessionId,
+              Date.now() - ACTIVE_SESSION_CHUNK_BOUND_MS,
+              readOpen
+            )
+          : await readOpen(sessionRowById({ id: retry.sessionId, startedAt: retry.startedAt }));
 
       if (!session) {
         // Session no longer exists or already stopped
@@ -1278,7 +1298,7 @@ async function handleMediaChange(
     await pubSubService.publish('session:stopped', stoppedSession.id);
 
     try {
-      await broadcastViolations(violationResults, insertedSession.id, pubSubService);
+      await broadcastViolations(violationResults, insertedSession, pubSubService);
     } catch (error) {
       console.error('[SSEProcessor] Error broadcasting violations:', error);
     }
@@ -1395,7 +1415,7 @@ async function updateExistingSession(
   const updateResult = await db
     .update(sessions)
     .set(updatePayload)
-    .where(and(eq(sessions.id, existingSession.id), isNull(sessions.stoppedAt)))
+    .where(and(sessionRowById(existingSession), isNull(sessions.stoppedAt)))
     .returning({ id: sessions.id });
 
   if (updateResult.length === 0) {
@@ -1440,7 +1460,7 @@ async function updateExistingSession(
               inputs
             );
             if (violations.length > 0 && pubSubService) {
-              await broadcastViolations(violations, existingSession.id, pubSubService);
+              await broadcastViolations(violations, existingSession, pubSubService);
             }
           }
 
@@ -1464,7 +1484,7 @@ async function updateExistingSession(
               inputs
             );
             if (violations.length > 0 && pubSubService) {
-              await broadcastViolations(violations, existingSession.id, pubSubService);
+              await broadcastViolations(violations, existingSession, pubSubService);
             }
           }
         }
@@ -1765,7 +1785,7 @@ async function confirmPendingSessionAndPersist(
   // Broadcast any violations
   if (pubSubService) {
     try {
-      await broadcastViolations(violationResults, insertedSession.id, pubSubService);
+      await broadcastViolations(violationResults, insertedSession, pubSubService);
     } catch (error) {
       console.error('[SSEProcessor] Error broadcasting violations:', error);
     }
@@ -1822,7 +1842,11 @@ async function stopSession(existingSession: typeof sessions.$inferSelect): Promi
   fastPathWindowStart.delete(existingSession.id);
 
   if (needsRetry && retryData && cacheService) {
-    await cacheService.addSessionWriteRetry(existingSession.id, retryData);
+    await cacheService.addSessionWriteRetry(
+      existingSession.id,
+      existingSession.startedAt.getTime(),
+      retryData
+    );
   }
 
   if (!wasUpdated) {

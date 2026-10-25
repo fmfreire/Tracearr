@@ -202,6 +202,18 @@ describe('MediaDetail page', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
+  it('renders a title with no library copies from its media row, not as an error', () => {
+    mockUseMediaDetail.mockReturnValue(detailQuery('movie'));
+
+    renderPage();
+
+    expect(screen.queryByText('media.detail.notFound.title')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Arrival').length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText('media.detail.hero.removedEverywhere.caption').length
+    ).toBeGreaterThan(0);
+  });
+
   it('paints the hero from a cached stub immediately while every other section stays in its own loading state', () => {
     mockFindCachedMediaStub.mockReturnValue({
       mediaId: 'media-1',
@@ -325,7 +337,7 @@ describe('MediaDetail page', () => {
     expect(link).toHaveAttribute('href', '/users/server-user-1');
     fireEvent.click(link);
     // stopPropagation keeps the row's session selection from firing.
-    expect(mockUseSession).not.toHaveBeenCalledWith('chain-1');
+    expect(mockUseSession).not.toHaveBeenCalledWith('chain-1', '2026-07-01T12:00:00.000Z');
   });
 
   it('opens the session slideout with the fetched chain session when a history row is activated', () => {
@@ -376,7 +388,7 @@ describe('MediaDetail page', () => {
 
     // The row click selects the chain id; the session hook is asked for it
     // and the sheet opens with the fetched session.
-    expect(mockUseSession).toHaveBeenCalledWith('chain-1');
+    expect(mockUseSession).toHaveBeenCalledWith('chain-1', '2026-07-01T12:00:00.000Z');
     expect(screen.getByTestId('session-sheet')).toHaveTextContent('chain-1');
   });
 
@@ -723,6 +735,54 @@ describe('MediaDetail page', () => {
 
     expect(mockUseMediaRequests).toHaveBeenCalledWith('media-1', ['srv-1']);
     expect(screen.getByRole('heading', { name: 'requests.mediaPanel.title' })).toBeInTheDocument();
+  });
+
+  it('shows the downloads panel only when the title has downloads', () => {
+    const base = detailQuery('movie') as { data: Record<string, unknown> };
+    const withDownloads = {
+      ...base,
+      data: {
+        ...base.data,
+        downloads: [
+          {
+            id: 'd-1',
+            serverId: 'srv-1',
+            serverName: 'Server',
+            serverUserId: 'su-1',
+            username: 'agelwarg',
+            identityName: 'Alice',
+            thumbUrl: null,
+            firstSeenAt: '2026-10-19T10:00:00.000Z',
+            lastSeenAt: '2026-10-19T10:00:00.000Z',
+            fileSizeBytes: 1024,
+            deliveredBytes: null,
+            playerName: 'Living room',
+            product: null,
+            platform: null,
+            app: null,
+            device: null,
+          },
+        ],
+      },
+    };
+    mockUseMediaDetail.mockReturnValue(withDownloads as never);
+
+    renderPage();
+
+    expect(screen.getByRole('heading', { name: 'pages:downloads.panelTitle' })).toBeInTheDocument();
+    expect(screen.getByText('Living room')).toBeInTheDocument();
+    expect(screen.getByText('1 KB')).toBeInTheDocument();
+  });
+
+  it('hides the downloads panel when the title has none', () => {
+    const base = detailQuery('movie') as { data: Record<string, unknown> };
+    mockUseMediaDetail.mockReturnValue({ ...base, data: { ...base.data, downloads: [] } } as never);
+
+    renderPage();
+
+    expect(
+      screen.queryByRole('heading', { name: 'pages:downloads.panelTitle' })
+    ).not.toBeInTheDocument();
   });
 
   it('names the earliest request that is still live in the hero line', () => {

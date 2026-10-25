@@ -1,13 +1,15 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, skipToken, useQuery } from '@tanstack/react-query';
 import { serverScopeFromIds, serverScopeKey } from '@tracearr/shared';
 import type { MediaType, DeviceCompatibilityMatrix, PeopleRank } from '@tracearr/shared';
 import {
   api,
+  type LocationFilterParams,
+  type LocationPeopleSelector,
   type PlaysBreakdownOptions,
   type PlaysGroupBy,
   type StatsTimeRange,
-  getBrowserTimezone,
 } from '@/lib/api';
+import { browserTimeZone } from '@/lib/dateFormat';
 
 // Re-export for backwards compatibility and convenience
 export type { StatsTimeRange };
@@ -17,7 +19,7 @@ export function useDashboardStats(
   options?: { enabled?: boolean; keepPrevious?: boolean }
 ) {
   // Include timezone in cache key since "today" varies by timezone
-  const timezone = getBrowserTimezone();
+  const timezone = browserTimeZone();
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   return useQuery({
     queryKey: ['stats', 'dashboard', serverIdsKey, timezone],
@@ -30,7 +32,7 @@ export function useDashboardStats(
 }
 
 export function useMyStats() {
-  const timezone = getBrowserTimezone();
+  const timezone = browserTimeZone();
   return useQuery({
     queryKey: ['stats', 'me', timezone],
     queryFn: () => api.stats.me(),
@@ -54,7 +56,7 @@ export function usePlaysStats(
   options?: { groupBy?: PlaysGroupBy }
 ) {
   // Include timezone in cache key since plays are grouped by local day
-  const timezone = getBrowserTimezone();
+  const timezone = browserTimeZone();
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   const groupBy = options?.groupBy;
   return useQuery({
@@ -64,30 +66,38 @@ export function usePlaysStats(
   });
 }
 
-export interface LocationStatsFilters {
-  timeRange?: StatsTimeRange;
-  serverUserId?: string;
-  serverUserIds?: string[];
-  serverIds?: string[];
-  mediaType?: 'movie' | 'episode' | 'track';
-}
+export type LocationStatsFilters = LocationFilterParams;
 
-export function useLocationStats(filters?: LocationStatsFilters) {
+function locationFiltersKey(filters?: LocationStatsFilters) {
   const serverIdsKey = serverScopeKey(serverScopeFromIds(filters?.serverIds));
   const serverUserIdsKey = filters?.serverUserIds?.length
     ? [...filters.serverUserIds].sort().join(',')
     : undefined;
+  return [
+    serverIdsKey,
+    filters?.serverUserId,
+    serverUserIdsKey,
+    filters?.mediaType,
+    filters?.timeRange,
+  ] as const;
+}
+
+export function useLocationStats(filters?: LocationStatsFilters) {
   return useQuery({
-    queryKey: [
-      'stats',
-      'locations',
-      serverIdsKey,
-      filters?.serverUserId,
-      serverUserIdsKey,
-      filters?.mediaType,
-      filters?.timeRange,
-    ],
+    queryKey: ['stats', 'locations', ...locationFiltersKey(filters)],
     queryFn: () => api.stats.locations(filters),
+    staleTime: 1000 * 60, // 1 minute
+  });
+}
+
+/** Every person of the selected place or area, which the list only carries the first few of. */
+export function useLocationPeople(
+  filters: LocationStatsFilters | undefined,
+  of: LocationPeopleSelector | null
+) {
+  return useQuery({
+    queryKey: ['stats', 'locations', 'people', ...locationFiltersKey(filters), of],
+    queryFn: of ? () => api.stats.locationPeople(filters, of) : skipToken,
     staleTime: 1000 * 60, // 1 minute
   });
 }
@@ -98,7 +108,7 @@ export function usePlaysByDayOfWeek(
   options: PlaysBreakdownOptions = {}
 ) {
   // Include timezone in cache key since day-of-week varies by timezone
-  const timezone = getBrowserTimezone();
+  const timezone = browserTimeZone();
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   const { self = false, groupBy } = options;
   return useQuery({
@@ -115,7 +125,7 @@ export function usePlaysByHourOfDay(
   options: PlaysBreakdownOptions = {}
 ) {
   // Include timezone in cache key since hour-of-day varies by timezone
-  const timezone = getBrowserTimezone();
+  const timezone = browserTimeZone();
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   const { self = false, groupBy } = options;
   return useQuery({
@@ -151,7 +161,7 @@ export function usePeople(
 ) {
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   return useQuery({
-    queryKey: ['stats', 'people', timeRange, serverIdsKey, opts, getBrowserTimezone()],
+    queryKey: ['stats', 'people', timeRange, serverIdsKey, opts, browserTimeZone()],
     queryFn: () => api.stats.people(timeRange, serverIds, opts),
     placeholderData: keepPreviousData,
     staleTime: 1000 * 60 * 5, // 5 minutes
@@ -292,6 +302,16 @@ export function useDeviceHealth(timeRange?: StatsTimeRange, serverIds?: string[]
   });
 }
 
+export function useDownloadsStats(timeRange?: StatsTimeRange, serverIds?: string[], page = 1) {
+  const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
+  return useQuery({
+    queryKey: ['stats', 'downloads', timeRange, serverIdsKey, page],
+    queryFn: () => api.stats.downloads(timeRange ?? { period: 'month' }, serverIds, page),
+    staleTime: 1000 * 60,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useTranscodeHotspots(timeRange?: StatsTimeRange, serverIds?: string[]) {
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   return useQuery({
@@ -308,7 +328,7 @@ export function useBandwidthDaily(
   serverUserId?: string
 ) {
   // Include timezone in cache key since bandwidth is grouped by local day
-  const timezone = getBrowserTimezone();
+  const timezone = browserTimeZone();
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   return useQuery({
     queryKey: ['stats', 'bandwidth-daily', timeRange, serverIdsKey, serverUserId, timezone],

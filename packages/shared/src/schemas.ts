@@ -476,6 +476,8 @@ export const historyQuerySchema = z.object({
   geoCountries: commaSeparatedArray(z.string().max(100)),
   geoCity: z.string().max(255).optional(), // City name
   geoRegion: z.string().max(255).optional(), // State/province
+  geoCityMissing: booleanStringSchema.optional(),
+  geoRegionMissing: booleanStringSchema.optional(),
   network: z.enum(['local', 'remote']).optional(),
 
   transcodeDecisions: commaSeparatedArray(z.enum(PLAYBACK_DECISIONS)),
@@ -520,6 +522,11 @@ export const filterOptionsQuerySchema = z
 
 export const sessionIdParamSchema = z.object({
   id: uuidSchema,
+});
+
+// The start the history row already shows, so the detail read opens only the chunks after it
+export const sessionDetailQuerySchema = z.object({
+  startedAt: z.coerce.date().optional(),
 });
 
 // Session termination schema
@@ -714,6 +721,8 @@ export const violationQuerySchema = paginationSchema
   .extend(violationRosterFilterSchema.shape)
   .extend(listSortSchema(VIOLATION_SORT_FIELDS).shape);
 
+export const violationCountQuerySchema = violationRosterFilterSchema;
+
 export const violationBulkBodySchema = z.object({
   ids: z.array(uuidSchema).max(1000).optional(),
   selectAll: z.boolean().optional(),
@@ -752,6 +761,8 @@ export const statsQuerySchema = statsQueryObjectSchema
   .refine(dateValidationRefinements.startBeforeEnd.refinement, {
     message: dateValidationRefinements.startBeforeEnd.message,
   });
+
+export const downloadsListQuerySchema = statsQuerySchema.safeExtend(paginationSchema.shape);
 
 export const PLAYS_MEDIA_GROUPS = ['movie', 'show', 'music'] as const;
 export type PlaysMediaGroup = (typeof PLAYS_MEDIA_GROUPS)[number];
@@ -821,6 +832,38 @@ export const locationStatsQuerySchema = z
   .refine(dateValidationRefinements.startBeforeEnd.refinement, {
     message: dateValidationRefinements.startBeforeEnd.message,
   });
+
+const placeNameSchema = z.string().nullable();
+
+// The full people of one place, named by its key (the JSON of [country, region, city, isLocal]),
+// or of every placed location whose coordinate lies inside a box.
+export const locationPeopleQuerySchema = locationStatsQuerySchema
+  .safeExtend({
+    place: z
+      .string()
+      .transform((key): unknown => {
+        try {
+          return JSON.parse(key);
+        } catch {
+          return undefined;
+        }
+      })
+      .pipe(z.tuple([placeNameSchema, placeNameSchema, placeNameSchema, z.boolean()]))
+      .optional(),
+    west: z.coerce.number().optional(),
+    south: z.coerce.number().optional(),
+    east: z.coerce.number().optional(),
+    north: z.coerce.number().optional(),
+  })
+  .refine(
+    (q) => {
+      const box = [q.west, q.south, q.east, q.north];
+      return q.place === undefined
+        ? box.every((v) => v !== undefined)
+        : box.every((v) => v === undefined);
+    },
+    { message: 'Pass place, or west, south, east and north' }
+  );
 
 // ============================================================================
 // Webhook & Settings Schemas
@@ -1326,79 +1369,56 @@ export const libraryStaleQuerySchema = z.object({
 });
 
 // Library watch statistics query schema
-export const libraryWatchQuerySchema = z.object({
-  serverId: uuidSchema.optional(),
-  serverIds: serverIdsQuerySchema,
-  libraryId: z.string().optional(),
-  mediaType: z.enum(['movie', 'episode', 'show']).optional(),
-  minWatchCount: z.coerce.number().int().min(0).optional(),
-  maxWatchCount: z.coerce.number().int().min(0).optional(),
-  includeUnwatched: z.coerce.boolean().default(true),
-  sortBy: z.enum(['watch_count', 'last_watched', 'title', 'file_size']).default('watch_count'),
-  sortOrder: z.enum(['asc', 'desc']).default('desc'),
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(20),
-});
+export const libraryWatchQuerySchema = withCustomWindow(
+  z.object({
+    serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
+    libraryId: z.string().optional(),
+    period: z.enum(['7d', '30d', '90d', '1y', 'all']).default('30d'),
+    ...customWindowFields,
+  })
+);
 
 // Library ROI (Return on Investment) query schema
-export const libraryRoiQuerySchema = z.object({
-  serverId: uuidSchema.optional(),
-  serverIds: serverIdsQuerySchema,
-  libraryId: z.string().optional(),
-  mediaType: z.enum([...LIBRARY_MEDIA_TYPES, 'all']).default('all'),
-  // Filter by value category
-  valueCategory: z.enum(['low_value', 'moderate_value', 'high_value', 'all']).default('all'),
-  // Time range for watch calculations (affects recency weighting)
-  periodDays: z.coerce.number().int().min(30).max(365).default(90),
-  // Include age decay in value calculation
-  includeAgeDecay: z.coerce.boolean().default(true),
-  // Minimum file size to include (bytes) - filter out tiny files
-  minFileSize: z.coerce.number().int().min(0).default(0),
-  sortBy: z
-    .enum(['watch_hours_per_gb', 'value_score', 'file_size', 'title'])
-    .default('watch_hours_per_gb'),
-  sortOrder: z.enum(['asc', 'desc']).default('asc'), // Low value first by default
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(20),
-});
+export const libraryRoiQuerySchema = withCustomWindow(
+  z.object({
+    serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
+    libraryId: z.string().optional(),
+    mediaType: z.enum(['movie', 'show', 'all']).default('all'),
+    period: z.enum(['7d', '30d', '90d', '1y', 'all']).default('30d'),
+    ...customWindowFields,
+    sortBy: z
+      .enum(['watch_hours_per_gb', 'watch_hours', 'file_size', 'last_watched', 'title'])
+      .default('watch_hours_per_gb'),
+    sortOrder: z.enum(['asc', 'desc']).default('desc'),
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(100).default(20),
+  })
+);
 
-// Library watch patterns query schema (binge, peak times, seasonal)
-export const libraryPatternsQuerySchema = z.object({
-  serverId: uuidSchema.optional(),
-  serverIds: serverIdsQuerySchema,
-  libraryId: z.string().optional(),
-  // Time range for pattern analysis (default: 52 weeks per CONTEXT.md)
-  periodWeeks: z.coerce.number().int().min(4).max(104).default(52),
-  // Scope: per-user patterns or server-wide aggregate
-  scope: z.enum(['user', 'server']).default('server'),
-  // Which patterns to include
-  includeBinge: z.coerce.boolean().default(true),
-  includePeakTimes: z.coerce.boolean().default(true),
-  includeSeasonalTrends: z.coerce.boolean().default(true),
-  // For binge: minimum episodes to consider a binge session
-  bingeThreshold: z.coerce.number().int().min(2).max(10).default(3),
-  // Limit for top binge shows
-  limit: z.coerce.number().int().positive().max(50).default(10),
-  // Timezone for hour/day extraction (defaults to UTC on backend)
-  timezone: timezoneSchema,
-});
-
-// Library completion rate analysis query schema
-export const libraryCompletionQuerySchema = z.object({
-  serverId: uuidSchema.optional(),
-  libraryId: z.string().optional(),
-  mediaType: z.enum(['movie', 'episode', 'show']).optional(),
-  // For TV: aggregate to episode, season, or series level
-  aggregateLevel: z.enum(['item', 'season', 'series']).default('item'),
-  // Completion status filter
-  status: z.enum(['completed', 'in_progress', 'not_started', 'all']).default('all'),
-  minCompletionPct: z.coerce.number().min(0).max(100).optional(),
-  maxCompletionPct: z.coerce.number().min(0).max(100).optional(),
-  sortBy: z.enum(['completion_pct', 'title', 'last_watched']).default('completion_pct'),
-  sortOrder: z.enum(['asc', 'desc']).default('desc'),
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(100).default(20),
-});
+// Library watch patterns query schema (binge, peak times, viewing trend)
+export const libraryPatternsQuerySchema = withCustomWindow(
+  z.object({
+    serverId: uuidSchema.optional(),
+    serverIds: serverIdsQuerySchema,
+    libraryId: z.string().optional(),
+    period: z.enum(['7d', '30d', '90d', '1y', 'all']).default('30d'),
+    ...customWindowFields,
+    // Scope: per-user patterns or server-wide aggregate
+    scope: z.enum(['user', 'server']).default('server'),
+    // Which patterns to include
+    includeBinge: z.coerce.boolean().default(true),
+    includePeakTimes: z.coerce.boolean().default(true),
+    includeSeasonalTrends: z.coerce.boolean().default(true),
+    // For binge: minimum episodes to consider a binge session
+    bingeThreshold: z.coerce.number().int().min(2).max(10).default(3),
+    // Limit for top binge shows
+    limit: z.coerce.number().int().positive().max(50).default(10),
+    // Timezone for hour/day extraction and trend buckets (defaults to UTC on backend)
+    timezone: timezoneSchema,
+  })
+);
 
 // Library top content query schema (for top movies and top shows endpoints)
 export const topContentQuerySchema = withCustomWindow(
@@ -1450,7 +1470,6 @@ export type LibraryStaleQueryInput = z.infer<typeof libraryStaleQuerySchema>;
 export type LibraryWatchQueryInput = z.infer<typeof libraryWatchQuerySchema>;
 export type LibraryRoiQueryInput = z.infer<typeof libraryRoiQuerySchema>;
 export type LibraryPatternsQueryInput = z.infer<typeof libraryPatternsQuerySchema>;
-export type LibraryCompletionQueryInput = z.infer<typeof libraryCompletionQuerySchema>;
 export type TopContentQueryInput = z.infer<typeof topContentQuerySchema>;
 export type ShelvesQueryInput = z.infer<typeof shelvesQuerySchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -1472,6 +1491,7 @@ export type ServerIdFilterInput = z.infer<typeof serverIdFilterSchema>;
 export type DashboardQueryInput = z.infer<typeof dashboardQuerySchema>;
 export type StatsQueryInput = z.infer<typeof statsQuerySchema>;
 export type LocationStatsQueryInput = z.infer<typeof locationStatsQuerySchema>;
+export type LocationPeopleQueryInput = z.infer<typeof locationPeopleQuerySchema>;
 export type UpdateSettingsInput = z.infer<typeof updateSettingsSchema>;
 export type TautulliImportInput = z.infer<typeof tautulliImportSchema>;
 
