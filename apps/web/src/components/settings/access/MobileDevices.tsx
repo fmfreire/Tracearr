@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NavLink } from 'react-router';
 import { QRCodeSVG } from 'qrcode.react';
@@ -25,6 +25,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsSection } from '@/components/settings/shell/SettingsSection';
 import { MobileDeviceRow } from '@/components/settings/access/MobileDeviceRow';
 import { BASE_PATH, BASE_URL } from '@/lib/basePath';
+import { formatDuration } from '@/lib/dateFormat';
 import {
   useDisableMobile,
   useEnableMobile,
@@ -74,6 +75,7 @@ function StoreBadges() {
 
 export function MobileDevices() {
   const { t } = useTranslation(['settings', 'common']);
+  const pairTokenInput = useRef<HTMLInputElement>(null);
   const { data: config, isLoading } = useMobileConfig();
   const { data: settings } = useSettings();
   const enableMobile = useEnableMobile();
@@ -154,12 +156,6 @@ export function MobileDevices() {
     const bytes = new TextEncoder().encode(jsonString);
     const encoded = btoa(String.fromCharCode(...bytes));
     return `tracearr://pair?data=${encoded}`;
-  };
-
-  const formatTimeLeft = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const deviceCount = config?.sessions?.length ?? 0;
@@ -283,7 +279,11 @@ export function MobileDevices() {
                   {timeLeft !== null && (
                     <div className="text-muted-foreground flex items-center gap-2 text-sm">
                       <Clock className="h-4 w-4" />
-                      <span>{t('mobile.expiresIn', { time: formatTimeLeft(timeLeft) })}</span>
+                      <span>
+                        {t('mobile.expiresIn', {
+                          time: formatDuration(timeLeft * 1000, { emptyValue: '0:00' }),
+                        })}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -292,12 +292,17 @@ export function MobileDevices() {
                   <FieldLabel htmlFor="pair-token">{t('mobile.oneTimePairToken')}</FieldLabel>
                   <div className="flex gap-2">
                     <Input
+                      ref={pairTokenInput}
                       id="pair-token"
                       readOnly
                       value={pairToken.token}
                       className="font-mono text-xs"
                     />
-                    <CopyButton value={pairToken.token} label={t('mobile.copyToken')} />
+                    <CopyButton
+                      value={pairToken.token}
+                      label={t('mobile.copyToken')}
+                      selectTarget={() => pairTokenInput.current}
+                    />
                   </div>
                   <FieldDescription>{t('mobile.tokenExpiryNote')}</FieldDescription>
                 </Field>

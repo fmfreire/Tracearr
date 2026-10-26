@@ -32,6 +32,7 @@ import type {
   PlayStats,
   DayOfWeekStats,
   HourOfDayStats,
+  LocationPeopleResponse,
   LocationStatsResponse,
   UserLocation,
   UserDevice,
@@ -114,9 +115,9 @@ import type {
   DuplicateFilesResponse,
   StaleResponse,
   WatchResponse,
-  CompletionResponse,
   PatternsResponse,
   RoiResponse,
+  LibraryRoiQueryInput,
   TopMoviesResponse,
   TopShowsResponse,
   LibraryCodecsResponse,
@@ -132,6 +133,7 @@ import type {
   MergeSuggestion,
   DismissedMergeSuggestion,
   ServerUserSplitResult,
+  OwnerLinkServer,
   UserSortField,
   UserRosterFilters,
   ListResponse,
@@ -146,6 +148,8 @@ import type {
   LibraryMediaType,
   LibrariesResponse,
   MediaDetailResponse,
+  MediaDownloadRow,
+  DownloadsStats,
   MediaChildrenResponse,
   AlbumDetailResponse,
   MediaStatsResponse,
@@ -166,6 +170,7 @@ import type {
   UserRangeStats,
   PeopleResponse,
   PeopleRank,
+  StorageWarning,
 } from '@tracearr/shared';
 
 // Re-export shared types needed by frontend components
@@ -176,11 +181,13 @@ export type {
   PlexAccount,
   PlexAccountsResponse,
 };
-import { API_BASE_PATH, getClientTimezone } from '@tracearr/shared';
+import { API_BASE_PATH } from '@tracearr/shared';
 
 import { BASE_PATH } from '@/lib/basePath';
+import { browserTimeZone } from '@/lib/dateFormat';
 export { BASE_PATH, BASE_URL, imageProxyUrl } from '@/lib/basePath';
 import { MAINTENANCE_EVENT } from '@/hooks/useMaintenanceMode';
+import type { ApiLibraryParams } from '@/hooks/useTimeRange';
 
 /** A settings write: loginMethods takes any subset of its switches, as the server's schema does. */
 export type SettingsUpdate = Omit<Partial<Settings>, 'loginMethods'> & {
@@ -325,6 +332,8 @@ function appendHistoryFilterParams(
   if (params.geoCountries?.length) searchParams.set('geoCountries', params.geoCountries.join(','));
   if (params.geoCity) searchParams.set('geoCity', params.geoCity);
   if (params.geoRegion) searchParams.set('geoRegion', params.geoRegion);
+  if (params.geoCityMissing) searchParams.set('geoCityMissing', 'true');
+  if (params.geoRegionMissing) searchParams.set('geoRegionMissing', 'true');
   if (params.network) searchParams.set('network', params.network);
   if (params.transcodeDecisions?.length)
     searchParams.set('transcodeDecisions', params.transcodeDecisions.join(','));
@@ -403,6 +412,37 @@ export interface StatsTimeRange {
   timezone?: string; // IANA timezone (e.g., 'America/Los_Angeles')
 }
 
+export interface LocationFilterParams {
+  timeRange?: StatsTimeRange;
+  serverUserId?: string;
+  serverUserIds?: string[];
+  serverIds?: string[];
+  mediaType?: 'movie' | 'episode' | 'track';
+}
+
+/** One place by its locationKey, or every placed location inside a box. */
+export type LocationPeopleSelector =
+  { place: string } | { west: number; south: number; east: number; north: number };
+
+function locationSearchParams(params: LocationFilterParams | undefined): URLSearchParams {
+  const searchParams = new URLSearchParams();
+  if (params?.timeRange?.period) searchParams.set('period', params.timeRange.period);
+  if (params?.timeRange?.startDate) searchParams.set('startDate', params.timeRange.startDate);
+  if (params?.timeRange?.endDate) searchParams.set('endDate', params.timeRange.endDate);
+  if (params?.serverUserIds?.length) {
+    searchParams.set('serverUserIds', params.serverUserIds.join(','));
+  } else if (params?.serverUserId) {
+    searchParams.set('serverUserId', params.serverUserId);
+  }
+  if (params?.serverIds?.length) {
+    for (const id of params.serverIds) {
+      searchParams.append('serverIds', id);
+    }
+  }
+  if (params?.mediaType) searchParams.set('mediaType', params.mediaType);
+  return searchParams;
+}
+
 /** Splits plays into movie, show and music rows. */
 export type PlaysGroupBy = 'mediaType';
 
@@ -410,10 +450,6 @@ export interface PlaysBreakdownOptions {
   self?: boolean;
   groupBy?: PlaysGroupBy;
 }
-
-// Re-export shared timezone helper for backwards compatibility
-// Uses Intl API which works in both browser and React Native
-export const getBrowserTimezone = getClientTimezone;
 
 // Types for Plex server selection during signup (from check-pin endpoint)
 export interface PlexServerConnection {
@@ -893,8 +929,9 @@ class ApiClient {
       return this.request<UserRangeStats>(`/users/${id}/stats?${params.toString()}`);
     },
     sessions: (id: string, params?: { page?: number; pageSize?: number; scope?: 'identity' }) => {
-      const query = new URLSearchParams(params as Record<string, string>).toString();
-      return this.request<PaginatedResponse<Session>>(`/users/${id}/sessions?${query}`);
+      return this.request<PaginatedResponse<Session>>(
+        `/users/${id}/sessions?${listSearchParams(params ?? {})}`
+      );
     },
     locations: async (id: string, params?: { scope?: 'identity' }) => {
       const query = new URLSearchParams();
@@ -912,13 +949,17 @@ class ApiClient {
       );
       return response.data;
     },
+    downloads: (id: string, params?: { page?: number; pageSize?: number; scope?: 'identity' }) => {
+      return this.request<{ data: MediaDownloadRow[]; total: number }>(
+        `/users/${id}/downloads?${listSearchParams(params ?? {})}`
+      );
+    },
     terminations: (
       id: string,
       params?: { page?: number; pageSize?: number; scope?: 'identity' }
     ) => {
-      const query = new URLSearchParams(params as Record<string, string>).toString();
       return this.request<PaginatedResponse<TerminationLogWithDetails>>(
-        `/users/${id}/terminations?${query}`
+        `/users/${id}/terminations?${listSearchParams(params ?? {})}`
       );
     },
     bulkResetTrust: (params: {
@@ -957,6 +998,19 @@ class ApiClient {
       }),
     restoreMergeSuggestion: (userA: string, userB: string) =>
       this.request<void>(`/users/merge-suggestions/dismissals/${userA}/${userB}`, {
+        method: 'DELETE',
+      }),
+    ownerLinks: async () => {
+      const response = await this.request<{ data: OwnerLinkServer[] }>('/users/owner-links');
+      return response.data;
+    },
+    linkOwnerAccount: (serverUserId: string) =>
+      this.request<UserMergeResult>('/users/owner-links', {
+        method: 'POST',
+        body: JSON.stringify({ serverUserId }),
+      }),
+    unlinkOwnerAccount: (serverUserId: string) =>
+      this.request<ServerUserSplitResult>(`/users/owner-links/${serverUserId}`, {
         method: 'DELETE',
       }),
     requests: (id: string, opts: { scope?: 'identity'; page: number; pageSize: number }) => {
@@ -1052,7 +1106,11 @@ class ApiClient {
       const query = params.toString();
       return this.request<ActiveSessionsResponse>(`/sessions/active${query ? `?${query}` : ''}`);
     },
-    get: (id: string) => this.request<SessionWithDetails>(`/sessions/${id}`),
+    // startedAt only narrows the server's read to the chunks after it; the id alone works too
+    get: (id: string, startedAt?: Date | string) =>
+      this.request<SessionWithDetails>(
+        `/sessions/${id}${startedAt ? `?startedAt=${new Date(startedAt).toISOString()}` : ''}`
+      ),
     terminate: (id: string, reason?: string) =>
       this.request<{ success: boolean; terminationLogId: string; message: string }>(
         `/sessions/${id}/terminate`,
@@ -1161,6 +1219,8 @@ class ApiClient {
     get: (id: string) => this.request<ViolationWithDetails>(`/violations/${id}`),
     list: (params: ViolationListParams = {}) =>
       this.request<ListResponse<ViolationWithDetails>>(`/violations?${listSearchParams(params)}`),
+    count: (params: Partial<ViolationRosterFilters> = {}) =>
+      this.request<{ total: number }>(`/violations/count?${listSearchParams(params)}`),
     acknowledge: (id: string) =>
       this.request<{ success: boolean; acknowledgedAt: Date | null }>(`/violations/${id}`, {
         method: 'PATCH',
@@ -1188,7 +1248,7 @@ class ApiClient {
     if (serverId) params.set('serverId', serverId);
     // Always include timezone for consistent chart display
     // Use provided timezone or fall back to browser's timezone
-    params.set('timezone', timeRange?.timezone ?? getBrowserTimezone());
+    params.set('timezone', timeRange?.timezone ?? browserTimeZone());
     return params;
   }
 
@@ -1208,7 +1268,7 @@ class ApiClient {
         params.append('serverIds', id);
       }
     }
-    params.set('timezone', timeRange?.timezone ?? getBrowserTimezone());
+    params.set('timezone', timeRange?.timezone ?? browserTimeZone());
     return params;
   }
 
@@ -1221,11 +1281,11 @@ class ApiClient {
         }
       }
       // Include timezone so "today" is calculated in user's local timezone
-      params.set('timezone', getBrowserTimezone());
+      params.set('timezone', browserTimeZone());
       return this.request<DashboardStats>(`/stats/dashboard?${params.toString()}`);
     },
     me: () => {
-      const params = new URLSearchParams({ timezone: getBrowserTimezone() });
+      const params = new URLSearchParams({ timezone: browserTimeZone() });
       return this.request<MyStats>(`/stats/me?${params.toString()}`);
     },
     myTitles: (serverIds?: string[]) => {
@@ -1244,6 +1304,11 @@ class ApiClient {
       if (opts.search) params.set('search', opts.search);
       return this.request<PeopleResponse>(`/stats/people?${params.toString()}`);
     },
+    downloads: (timeRange: StatsTimeRange, serverIds: string[] | undefined, page = 1) => {
+      const params = this.buildStatsParamsMulti(timeRange, serverIds);
+      params.set('page', String(page));
+      return this.request<DownloadsStats>(`/stats/downloads?${params.toString()}`);
+    },
     plays: async (timeRange?: StatsTimeRange, serverIds?: string[], groupBy?: PlaysGroupBy) => {
       const params = this.buildStatsParamsMulti(timeRange ?? { period: 'week' }, serverIds);
       if (groupBy) params.set('groupBy', groupBy);
@@ -1252,30 +1317,23 @@ class ApiClient {
       );
       return response.data;
     },
-    locations: async (params?: {
-      timeRange?: StatsTimeRange;
-      serverUserId?: string;
-      serverUserIds?: string[];
-      serverIds?: string[];
-      mediaType?: 'movie' | 'episode' | 'track';
-    }) => {
-      const searchParams = new URLSearchParams();
-      if (params?.timeRange?.period) searchParams.set('period', params.timeRange.period);
-      if (params?.timeRange?.startDate) searchParams.set('startDate', params.timeRange.startDate);
-      if (params?.timeRange?.endDate) searchParams.set('endDate', params.timeRange.endDate);
-      if (params?.serverUserIds?.length) {
-        searchParams.set('serverUserIds', params.serverUserIds.join(','));
-      } else if (params?.serverUserId) {
-        searchParams.set('serverUserId', params.serverUserId);
-      }
-      if (params?.serverIds?.length) {
-        for (const id of params.serverIds) {
-          searchParams.append('serverIds', id);
+    locations: async (params?: LocationFilterParams) => {
+      const query = locationSearchParams(params).toString();
+      return this.request<LocationStatsResponse>(`/stats/locations${query ? `?${query}` : ''}`);
+    },
+    locationPeople: async (
+      params: LocationFilterParams | undefined,
+      of: LocationPeopleSelector
+    ) => {
+      const searchParams = locationSearchParams(params);
+      if ('place' in of) {
+        searchParams.set('place', of.place);
+      } else {
+        for (const side of ['west', 'south', 'east', 'north'] as const) {
+          searchParams.set(side, String(of[side]));
         }
       }
-      if (params?.mediaType) searchParams.set('mediaType', params.mediaType);
-      const query = searchParams.toString();
-      return this.request<LocationStatsResponse>(`/stats/locations${query ? `?${query}` : ''}`);
+      return this.request<LocationPeopleResponse>(`/stats/locations/people?${searchParams}`);
     },
     playsByDayOfWeek: async (
       timeRange?: StatsTimeRange,
@@ -1468,7 +1526,7 @@ class ApiClient {
         }
       }
       if (libraryId) params.set('libraryId', libraryId);
-      params.set('timezone', getBrowserTimezone());
+      params.set('timezone', browserTimeZone());
       return this.request<LibraryStatsResponse>(`/library/stats?${params.toString()}`);
     },
     growth: (
@@ -1488,7 +1546,7 @@ class ApiClient {
       params.set('period', period);
       if (startDate) params.set('startDate', startDate);
       if (endDate) params.set('endDate', endDate);
-      params.set('timezone', getBrowserTimezone());
+      params.set('timezone', browserTimeZone());
       return this.request<LibraryGrowthResponse>(`/library/growth?${params.toString()}`);
     },
     quality: (
@@ -1504,7 +1562,7 @@ class ApiClient {
       params.set('mediaType', mediaType);
       if (startDate) params.set('startDate', startDate);
       if (endDate) params.set('endDate', endDate);
-      params.set('timezone', getBrowserTimezone());
+      params.set('timezone', browserTimeZone());
       return this.request<LibraryQualityResponse>(`/library/quality?${params.toString()}`);
     },
     storage: (
@@ -1520,7 +1578,7 @@ class ApiClient {
       params.set('period', period);
       if (startDate) params.set('startDate', startDate);
       if (endDate) params.set('endDate', endDate);
-      params.set('timezone', getBrowserTimezone());
+      params.set('timezone', browserTimeZone());
       return this.request<LibraryStorageResponse>(`/library/storage?${params.toString()}`);
     },
     // Scoped variant: one request over the whole selection, so the server's
@@ -1538,7 +1596,7 @@ class ApiClient {
       params.set('period', period);
       if (startDate) params.set('startDate', startDate);
       if (endDate) params.set('endDate', endDate);
-      params.set('timezone', getBrowserTimezone());
+      params.set('timezone', browserTimeZone());
       return this.request<LibraryStorageResponse>(`/library/storage?${params.toString()}`);
     },
     duplicates: (serverIds?: string[], page: number = 1, pageSize: number = 20) => {
@@ -1586,36 +1644,28 @@ class ApiClient {
       params.set('sortOrder', sortOrder);
       return this.request<StaleResponse>(`/library/stale?${params.toString()}`);
     },
-    watch: (serverIds?: string[], libraryId?: string, page: number = 1, pageSize: number = 20) => {
-      const params = new URLSearchParams();
-      if (serverIds?.length) {
-        for (const id of serverIds) {
-          params.append('serverIds', id);
-        }
-      }
-      if (libraryId) params.set('libraryId', libraryId);
-      params.set('page', String(page));
-      params.set('pageSize', String(pageSize));
-      return this.request<WatchResponse>(`/library/watch?${params.toString()}`);
-    },
-    completion: (
-      serverId?: string,
-      libraryId?: string,
-      aggregateLevel: string = 'item',
-      page: number = 1,
-      pageSize: number = 20,
-      mediaType?: 'movie' | 'episode'
+    watch: (
+      serverIds: string[] | undefined,
+      libraryId: string | undefined,
+      range: ApiLibraryParams
     ) => {
       const params = new URLSearchParams();
-      if (serverId) params.set('serverId', serverId);
+      if (serverIds?.length) {
+        for (const id of serverIds) {
+          params.append('serverIds', id);
+        }
+      }
       if (libraryId) params.set('libraryId', libraryId);
-      params.set('aggregateLevel', aggregateLevel);
-      params.set('page', String(page));
-      params.set('pageSize', String(pageSize));
-      if (mediaType) params.set('mediaType', mediaType);
-      return this.request<CompletionResponse>(`/library/completion?${params.toString()}`);
+      params.set('period', range.period);
+      if (range.startDate) params.set('startDate', range.startDate);
+      if (range.endDate) params.set('endDate', range.endDate);
+      return this.request<WatchResponse>(`/library/watch?${params.toString()}`);
     },
-    patterns: (serverIds?: string[], libraryId?: string, periodWeeks: number = 12) => {
+    patterns: (
+      serverIds: string[] | undefined,
+      libraryId: string | undefined,
+      range: ApiLibraryParams
+    ) => {
       const params = new URLSearchParams();
       if (serverIds?.length) {
         for (const id of serverIds) {
@@ -1623,18 +1673,23 @@ class ApiClient {
         }
       }
       if (libraryId) params.set('libraryId', libraryId);
-      params.set('periodWeeks', String(periodWeeks));
-      params.set('timezone', getBrowserTimezone());
+      params.set('period', range.period);
+      if (range.startDate) params.set('startDate', range.startDate);
+      if (range.endDate) params.set('endDate', range.endDate);
+      params.set('timezone', browserTimeZone());
       return this.request<PatternsResponse>(`/library/patterns?${params.toString()}`);
     },
     roi: (
-      serverIds?: string[],
-      libraryId?: string,
+      serverIds: string[] | undefined,
+      libraryId: string | undefined,
+      period: string,
+      startDate: string | undefined,
+      endDate: string | undefined,
       page: number = 1,
       pageSize: number = 20,
-      mediaType?: 'movie' | 'show' | 'artist',
-      sortBy: 'watch_hours_per_gb' | 'value_score' | 'file_size' | 'title' = 'watch_hours_per_gb',
-      sortOrder: 'asc' | 'desc' = 'asc'
+      mediaType?: 'movie' | 'show',
+      sortBy: LibraryRoiQueryInput['sortBy'] = 'watch_hours_per_gb',
+      sortOrder: 'asc' | 'desc' = 'desc'
     ) => {
       const params = new URLSearchParams();
       if (serverIds?.length) {
@@ -1643,12 +1698,14 @@ class ApiClient {
         }
       }
       if (libraryId) params.set('libraryId', libraryId);
+      params.set('period', period);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
       if (mediaType) params.set('mediaType', mediaType);
       params.set('sortBy', sortBy);
       params.set('sortOrder', sortOrder);
-      params.set('timezone', getBrowserTimezone());
       return this.request<RoiResponse>(`/library/roi?${params.toString()}`);
     },
     topMovies: (
@@ -1950,6 +2007,9 @@ class ApiClient {
       this.request<{ token: string }>('/settings/api-key/regenerate', { method: 'POST' }),
     getIpWarning: () =>
       this.request<{ showWarning: boolean; stateHash: string }>('/settings/ip-warning'),
+    getStorageWarning: () => this.request<StorageWarning>('/settings/storage-warning'),
+    dismissStorageWarning: () =>
+      this.request<void>('/settings/storage-warning/dismiss', { method: 'POST' }),
     getImageCache: () => this.request<ImageCacheStatus>('/settings/image-cache'),
   };
 

@@ -1,8 +1,7 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
-  getClientTimezone,
   MERGE_SAME_SERVER_CONFIRMATION_REQUIRED,
   serverScopeFromIds,
   serverScopeKey,
@@ -12,6 +11,7 @@ import {
   type UserRosterFilters,
 } from '@tracearr/shared';
 import { api, type StatsTimeRange, type UserListParams } from '@/lib/api';
+import { browserTimeZone } from '@/lib/dateFormat';
 
 export function useUsers(params: UserListParams = {}, options: { enabled?: boolean } = {}) {
   const serverIdsKey = serverScopeKey(serverScopeFromIds(params.serverIds));
@@ -53,7 +53,7 @@ export function useUserRangeStats(
   params: { scope?: 'identity' } & StatsTimeRange,
   serverIds: string[]
 ) {
-  const timezone = getClientTimezone();
+  const timezone = browserTimeZone();
   const serverIdsKey = serverScopeKey(serverScopeFromIds(serverIds));
   return useQuery({
     queryKey: ['users', 'range-stats', id, params, serverIdsKey, timezone],
@@ -72,6 +72,18 @@ export function useUserSessions(
     queryFn: () => api.users.sessions(id, params),
     enabled: !!id,
     staleTime: 1000 * 60, // 1 minute
+  });
+}
+
+export function useUserDownloads(
+  id: string,
+  params: { page?: number; pageSize?: number; scope?: 'identity' } = {}
+) {
+  return useQuery({
+    queryKey: ['users', 'downloads', id, params],
+    queryFn: () => api.users.downloads(id, params),
+    enabled: !!id,
+    staleTime: 1000 * 60,
   });
 }
 
@@ -257,6 +269,15 @@ export function useRestoreMergeSuggestion() {
   });
 }
 
+// Leaderboards, dashboard and history aggregate by identity, so moving an account between people
+// drops their cached data too, not just the roster.
+function invalidateIdentityQueries(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: ['users'] });
+  void queryClient.invalidateQueries({ queryKey: ['stats'] });
+  void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+  void queryClient.invalidateQueries({ queryKey: ['violations'] });
+}
+
 export function useMergeUsers() {
   const { t } = useTranslation('notifications');
   const queryClient = useQueryClient();
@@ -272,12 +293,7 @@ export function useMergeUsers() {
         confirmSameServerCombine: input.confirmSameServerCombine,
       }),
     onSuccess: (data) => {
-      // Leaderboards/dashboard/history aggregate by identity, so a merge has to
-      // drop their cached pre-merge data too, not just the roster.
-      void queryClient.invalidateQueries({ queryKey: ['users'] });
-      void queryClient.invalidateQueries({ queryKey: ['stats'] });
-      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      void queryClient.invalidateQueries({ queryKey: ['violations'] });
+      invalidateIdentityQueries(queryClient);
       toast.success(t('toast.success.usersMerged.title'), {
         description:
           data.droppedRuleNames.length > 0
@@ -305,15 +321,52 @@ export function useSplitServerUser() {
   return useMutation({
     mutationFn: (input: { serverUserId: string }) => api.serverUsers.split(input.serverUserId),
     onSuccess: () => {
-      // Same reasoning as merge: splitting reshapes identity-level aggregates too.
-      void queryClient.invalidateQueries({ queryKey: ['users'] });
-      void queryClient.invalidateQueries({ queryKey: ['stats'] });
-      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      void queryClient.invalidateQueries({ queryKey: ['violations'] });
+      invalidateIdentityQueries(queryClient);
       toast.success(t('toast.success.serverUserSplit.title'));
     },
     onError: (error: Error) => {
       toast.error(t('toast.error.serverUserSplitFailed'), { description: error.message });
+    },
+  });
+}
+
+export function useOwnerLinks(enabled: boolean) {
+  return useQuery({
+    queryKey: ['users', 'owner-links'],
+    queryFn: () => api.users.ownerLinks(),
+    enabled,
+    staleTime: 1000 * 60,
+  });
+}
+
+export function useLinkOwnerAccount() {
+  const { t } = useTranslation('notifications');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (serverUserId: string) => api.users.linkOwnerAccount(serverUserId),
+    onSuccess: () => {
+      invalidateIdentityQueries(queryClient);
+      toast.success(t('toast.success.ownerAccountLinked'));
+    },
+    onError: (error: Error) => {
+      toast.error(t('toast.error.ownerAccountLinkFailed'), { description: error.message });
+    },
+  });
+}
+
+export function useUnlinkOwnerAccount() {
+  const { t } = useTranslation('notifications');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (serverUserId: string) => api.users.unlinkOwnerAccount(serverUserId),
+    onSuccess: () => {
+      invalidateIdentityQueries(queryClient);
+      toast.success(t('toast.success.ownerAccountUnlinked'));
+    },
+    onError: (error: Error) => {
+      toast.error(t('toast.error.ownerAccountUnlinkFailed'), { description: error.message });
     },
   });
 }

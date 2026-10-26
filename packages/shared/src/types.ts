@@ -278,6 +278,25 @@ export interface ServerUserSplitResult {
   serverUserId: string;
 }
 
+/** Why an account cannot be linked to the owner as it stands. */
+export type OwnerLinkBlockedReason = 'other_accounts' | 'signs_in';
+
+export interface OwnerLinkCandidate {
+  serverUserId: string;
+  username: string;
+  thumbUrl: string | null;
+  isServerAdmin: boolean;
+  lastActivityAt: string | null;
+  blockedReason: OwnerLinkBlockedReason | null;
+}
+
+/** The owner's own account on one Jellyfin or Emby server, or the accounts it could be. */
+export interface OwnerLinkServer {
+  serverId: string;
+  linked: { serverUserId: string; username: string } | null;
+  candidates: OwnerLinkCandidate[];
+}
+
 export interface MergeSuggestionIdentity {
   userId: string;
   username: string;
@@ -785,23 +804,32 @@ export interface UserStats {
 }
 
 export interface LocationUserInfo {
-  id: string;
+  id: string; // Representative server_user id
   username: string;
+  identityName: string | null;
   thumbUrl: string | null;
+  serverId: string; // The representative account's server, which owns thumbUrl
+  serverUserIds: string[]; // Every account of the identity within the caller's servers
+  count: number; // Plays at this location
 }
+
+/** The people each location of the /stats/locations list carries; the list draws this many avatars. */
+export const LOCATION_LIST_PEOPLE = 3;
 
 export interface LocationStats {
   city: string | null;
   region: string | null; // State/province
   country: string | null;
   isLocal: boolean;
-  lat: number;
-  lon: number;
+  lat: number | null; // Null when no session in the group has coordinates
+  lon: number | null;
   count: number;
   lastActivity?: Date;
   firstActivity?: Date;
-  // Contextual data - populated based on filters
-  users?: LocationUserInfo[]; // Top users at this location (when not filtering by userId)
+  // Count DESC then name: the first LOCATION_LIST_PEOPLE in the list, every person from
+  // /stats/locations/people. One entry under a user filter.
+  users?: LocationUserInfo[];
+  peopleCount: number;
   deviceCount?: number; // Unique devices from this location
   // Per-server breakdown ordered by count DESC; servers[0] is the dominant server
   servers?: { serverId: string; count: number }[];
@@ -820,7 +848,6 @@ export interface LocationFilterOptions {
     identityName: string | null;
     serverUserIds: string[];
   }[];
-  servers: { id: string; name: string }[];
   mediaTypes: MediaType[];
 }
 
@@ -828,6 +855,10 @@ export interface LocationStatsResponse {
   data: LocationStats[];
   summary: LocationStatsSummary;
   availableFilters: LocationFilterOptions;
+}
+
+export interface LocationPeopleResponse {
+  data: LocationStats[];
 }
 
 export interface LibraryStats {
@@ -1184,6 +1215,30 @@ export interface ImageCacheStatus {
   shortfallBytes: number;
 }
 
+/** Supervised template volumes: postgres is PostgreSQL Data, redis is Redis Data, appData is App Data. */
+export type StorageMountKey = 'postgres' | 'redis' | 'appData';
+
+export interface StorageMountIssue {
+  key: StorageMountKey;
+  /** From /proc/self/mountinfo, for example fuse.shfs. */
+  fsType: string;
+  /** Host path, known only for fuse.shfs: /mnt/user plus the share-relative root. */
+  currentPath: string | null;
+  placement:
+    | { kind: 'pool'; pool: string; newPath: string }
+    /** system.LOCATIONS names as reported, array disks and pools alike. */
+    | { kind: 'split'; disks: string[] }
+    | { kind: 'unknown' };
+}
+
+/** GET /settings/storage-warning. Not applicable outside the supervised image. */
+export interface StorageWarning {
+  applicable: boolean;
+  issues: StorageMountIssue[];
+  bootId: string;
+  dismissed: boolean;
+}
+
 // Tailscale integration
 export type TailscaleStatus =
   'disabled' | 'starting' | 'awaiting_auth' | 'connected' | 'error' | 'stopping';
@@ -1432,7 +1487,7 @@ export interface DeviceLocation {
   city: string | null;
   region: string | null;
   country: string | null;
-  isLocal: boolean;
+  isLocal: boolean | null;
   sessionCount: number;
   lastSeenAt: Date;
 }
@@ -1445,8 +1500,65 @@ export interface UserDevice {
   device: string | null;
   platform: string | null;
   sessionCount: number;
+  downloadCount: number;
   lastSeenAt: Date;
   locations: DeviceLocation[]; // Where this device has been used from
+}
+
+export type MediaDownloadSource = 'activity_log' | 'emby_sync' | 'plex' | 'jellyfin_transcode';
+
+export interface MediaDownloadRow {
+  id: string;
+  serverId: string;
+  serverName: string;
+  serverType: ServerType;
+  serverUserId: string | null;
+  username: string | null;
+  identityName: string | null;
+  thumbUrl: string | null;
+  libraryItemId: string | null;
+  mediaId: string | null;
+  title: string;
+  mediaType: string | null;
+  thumbPath: string | null;
+  app: string | null;
+  device: string | null;
+  source: MediaDownloadSource;
+  requestCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  videoResolution: string | null;
+  videoCodec: string | null;
+  videoDynamicRange: string | null;
+  container: string | null;
+  fileSizeBytes: number | null;
+  ipAddress: string | null;
+  isLocal: boolean | null;
+  geoCity: string | null;
+  geoRegion: string | null;
+  geoCountry: string | null;
+  deliveredBytes: number | null;
+  deliveredVideoCodec: string | null;
+  deliveredAudioCodec: string | null;
+  deliveredContainer: string | null;
+  deliveredBitrateKbps: number | null;
+  deliveredResolution: string | null;
+  /** A converted pull's last reported progress */
+  completionPercent: number | null;
+  deviceId: string | null;
+  playerName: string | null;
+  product: string | null;
+  platform: string | null;
+}
+
+export interface DownloadsStats {
+  total: number;
+  people: number;
+  totalBytes: number;
+  topTitle: { title: string; count: number; libraryItemId: string | null } | null;
+  rows: MediaDownloadRow[];
+  page: number;
+  pageSize: number;
 }
 
 // API response types
@@ -1813,7 +1925,9 @@ export interface PlexActivityNotification {
     subtitle: string;
     progress: number;
     Context?: {
-      key: string;
+      deviceID: string;
+      metadataID: string;
+      partID: string;
     };
   };
 }
@@ -2569,7 +2683,7 @@ export interface LibraryStorageResponse {
 // Library Duplicates Response (GET /library/duplicates)
 /** 'version' groups are one title whose single library item carries several
  * physical files; the others group distinct items (copies) by identity. */
-export type MatchType = 'imdb' | 'tmdb' | 'tvdb' | 'fuzzy' | 'version';
+export type MatchType = 'imdb' | 'tmdb' | 'tvdb' | 'mbid' | 'fuzzy' | 'version';
 
 /** One physical file of a duplicate item */
 export interface DuplicateItemVersion {
@@ -2577,6 +2691,7 @@ export interface DuplicateItemVersion {
   serverVersionKey: string;
   resolution: string | null;
   videoCodec: string | null;
+  audioCodec: string | null;
   fileSize: number | null;
   filePath: string | null;
   /**
@@ -2599,6 +2714,8 @@ export interface DuplicateItem {
   mediaType: string;
   /** Show for an episode, artist for a track; null for anything flat */
   grandparentTitle: string | null;
+  /** Album for a track, season for an episode */
+  parentTitle: string | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
   fileSize: number | null;
@@ -2630,7 +2747,14 @@ export interface DuplicatesSummary {
   totalGroups: number;
   totalDuplicateItems: number;
   totalPotentialSavingsBytes: number;
-  byMatchType: { imdb: number; tmdb: number; tvdb: number; fuzzy: number; version: number };
+  byMatchType: {
+    imdb: number;
+    tmdb: number;
+    tvdb: number;
+    mbid: number;
+    fuzzy: number;
+    version: number;
+  };
 }
 
 export interface DuplicatesResponse {
@@ -2692,122 +2816,30 @@ export interface StaleResponse {
 
 // Library Watch Statistics Response (GET /library/watch)
 
-/**
- * A single "most watched" row returned by the watch endpoint.
- * When multiple servers are in scope, the same title is collapsed
- * into one row (deduped by external ID match key) and serverIds
- * lists every server that has a copy of the title.
- */
-export interface WatchItem {
-  id: string;
-  /** Primary server for this title (lowest sort value when deduped across servers). */
-  serverId: string;
-  serverName: string;
-  libraryId: string;
-  title: string;
-  mediaType: string;
-  year: number | null;
-  fileSize: number | null;
-  resolution: string | null;
-  addedAt: string;
-  /** Total play count summed across all servers for this title. */
-  watchCount: number;
-  /** Total watch duration summed across all servers for this title. */
-  totalWatchMs: number;
-  lastWatchedAt: string | null;
-  /** All server IDs that own a copy of this title (for per-title color dots). */
-  serverIds: string[];
+/** Titles by what happened to them in the window; the three add up to the titles in scope. */
+export interface CompletionCounts {
+  completed: number;
+  inProgress: number;
+  notStarted: number;
 }
 
+/**
+ * Movies and episodes counted one by one by media identity. totalItems and notStarted cover
+ * the titles in scope regardless of the window; everything else is activity in the window.
+ */
 export interface WatchSummary {
-  /** Distinct title count (deduped by external ID). */
   totalItems: number;
-  /** Distinct titles with at least one play (deduped by external ID). */
+  /** Titles with at least one counted play in the window. */
   watchedCount: number;
-  unwatchedCount: number;
   watchedPct: number;
-  /** Sum of all watch durations across all servers. */
   totalWatchMs: number;
-  avgWatchesPerItem: number;
-  /** Distinct titles fully completed (deduped by external ID), if available. */
-  completedCount: number;
+  avgPlaysPerItem: number;
+  completion: { movie: CompletionCounts; episode: CompletionCounts };
 }
 
 export interface WatchResponse {
-  items: WatchItem[];
   summary: WatchSummary;
-  pagination: { page: number; pageSize: number; total: number };
 }
-
-// Library Completion Response (GET /library/completion)
-export type CompletionStatus = 'completed' | 'in_progress' | 'not_started';
-
-export interface CompletionItem {
-  id: string;
-  serverId: string;
-  serverName: string;
-  title: string;
-  mediaType: string;
-  completionPct: number;
-  watchedMs: number;
-  runtimeMs: number;
-  showTitle: string | null;
-  seasonNumber: number | null;
-  episodeNumber: number | null;
-  status: CompletionStatus;
-  lastWatchedAt: string | null;
-}
-
-export interface SeasonCompletion {
-  serverId: string;
-  serverName: string;
-  showTitle: string;
-  seasonNumber: number;
-  totalEpisodes: number;
-  completedEpisodes: number;
-  inProgressEpisodes: number;
-  completionPct: number;
-  status: CompletionStatus;
-}
-
-export interface SeriesCompletion {
-  serverId: string;
-  serverName: string;
-  showTitle: string;
-  totalSeasons: number;
-  completedSeasons: number;
-  totalEpisodes: number;
-  completedEpisodes: number;
-  avgSeasonCompletionPct: number;
-  status: CompletionStatus;
-}
-
-export interface CompletionSummary {
-  totalItems: number;
-  completedCount: number;
-  inProgressCount: number;
-  notStartedCount: number;
-  overallCompletionPct: number;
-}
-
-export interface CompletionPaginationInfo {
-  page: number;
-  pageSize: number;
-  total: number;
-}
-
-export type CompletionResponse =
-  | { items: CompletionItem[]; summary: CompletionSummary; pagination: CompletionPaginationInfo }
-  | {
-      seasons: SeasonCompletion[];
-      summary: CompletionSummary;
-      pagination: CompletionPaginationInfo;
-    }
-  | {
-      series: SeriesCompletion[];
-      summary: CompletionSummary;
-      pagination: CompletionPaginationInfo;
-    };
 
 export type WatchedState = 'watched' | 'partial' | 'unwatched';
 
@@ -3133,6 +3165,7 @@ export interface MediaDetailResponse {
   posterUrl: string | null;
   posterVersion: string | null;
   dominantColor: string | null;
+  downloads: MediaDownloadRow[];
 }
 
 export interface MediaChildEntry {
@@ -3282,6 +3315,8 @@ export interface MediaSeasonHeatResponse {
  * different servers are collapsed into one row (deduped by show matchKey).
  */
 export interface BingeShow {
+  /** Show identity, a merged alias folded into its winner. */
+  showMediaId: string;
   showTitle: string;
   /** Server with the most episodes watched in this binge journey. */
   primaryServerId: string;
@@ -3303,12 +3338,13 @@ export interface HourlyDistribution {
   pctOfTotal: number;
 }
 
-export interface MonthlyTrend {
-  month: string;
+export type TrendBucket = 'day' | 'week' | 'month';
+
+export interface TrendPoint {
+  /** Bucket start in the request timezone, YYYY-MM-DD. */
+  start: string;
   watchCount: number;
-  totalWatchMs: number;
-  uniqueItems: number;
-  avgWatchesPerDay: number;
+  totalWatchHours: number;
 }
 
 export interface PatternsResponse {
@@ -3318,10 +3354,11 @@ export interface PatternsResponse {
     peakHour: number;
     peakDayOfWeek: number;
   };
-  seasonalTrends: {
-    monthlyTrends: MonthlyTrend[];
-    busiestMonth: string;
-    quietestMonth: string;
+  trend: {
+    bucket: TrendBucket;
+    points: TrendPoint[];
+    busiest: string | null;
+    quietest: string | null;
   };
   summary: {
     totalWatchSessions: number;
@@ -3331,26 +3368,23 @@ export interface PatternsResponse {
 }
 
 // Library ROI Response (GET /library/roi)
-export type ValueCategory = 'low_value' | 'moderate_value' | 'high_value';
-
 export interface RoiItem {
   id: string;
+  mediaId: string | null;
   serverId: string;
   serverName: string;
+  /** Every selected server holding a copy of this title. */
+  serverIds: string[];
   title: string;
-  mediaType: string;
+  mediaType: 'movie' | 'show';
   year: number | null;
   fileSizeBytes: number;
   fileSizeGb: number;
   watchCount: number;
-  totalWatchMs: number;
   totalWatchHours: number;
-  lastWatchedAt: string | null;
-  daysSinceLastWatch: number | null;
   watchHoursPerGb: number;
-  valueScore: number;
-  valueCategory: ValueCategory;
-  suggestDeletion: boolean;
+  /** All time, UTC day as YYYY-MM-DD. */
+  lastWatchedAt: string | null;
 }
 
 export interface RoiSummary {
@@ -3358,21 +3392,11 @@ export interface RoiSummary {
   totalStorageGb: number;
   totalWatchHours: number;
   avgWatchHoursPerGb: number;
-  lowValueItems: number;
-  lowValueStorageGb: number;
-  potentialSavingsGb: number;
-}
-
-export interface ValueThresholds {
-  movie: { lowValue: number; highValue: number };
-  episode: { lowValue: number; highValue: number };
-  show: { lowValue: number; highValue: number };
 }
 
 export interface RoiResponse {
   items: RoiItem[];
   summary: RoiSummary;
-  thresholds: ValueThresholds;
   pagination: { page: number; pageSize: number; total: number };
 }
 
@@ -3403,6 +3427,8 @@ export interface TopMoviesResponse {
 }
 
 export interface TopShow {
+  /** Canonical media id of the show, unique per row where titles may repeat. */
+  mediaId: string;
   showTitle: string;
   year: number | null;
   thumbPath: string | null;

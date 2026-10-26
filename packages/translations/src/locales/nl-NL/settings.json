@@ -59,6 +59,11 @@
     "timeFormatDescription": "Kies hoe tijden worden weergegeven.",
     "timeFormat12h": "12-uurs (1:30 PM)",
     "timeFormat24h": "24-uurs (13:30)",
+    "dateFormat": "",
+    "dateFormatDescription": "",
+    "weekStart": "",
+    "weekStartDescription": "",
+    "automatic": "",
     "theme": "Thema",
     "accentColor": "Accent kleur",
     "default": "(standaard)",
@@ -251,6 +256,29 @@
       "installed": "",
       "upToDate": "",
       "updateAvailable": ""
+    },
+    "ownerAccount": {
+      "label": "",
+      "link": "",
+      "unlink": "",
+      "dialog": {
+        "title": "",
+        "description": "",
+        "admin": "",
+        "lastActive": "",
+        "neverActive": "",
+        "otherAccounts": "",
+        "signsIn": "",
+        "warningTitle": "",
+        "warning": "",
+        "warning_jellyfin": "",
+        "confirmLabel": "",
+        "submit": ""
+      },
+      "confirmUnlink": {
+        "title": "",
+        "body": ""
+      }
     }
   },
   "mobile": {
@@ -520,6 +548,51 @@
   "ipWarning": {
     "message": "Alle gebruikers lijken hetzelfde IP-adres of een lokaal IP te gebruiken. Dit kan invloed hebben op de regellogica voor locatie of IP-adressen.",
     "acknowledge": "Begrepen"
+  },
+  "storageWarning": {
+    "bannerDatabase": "",
+    "bannerData": "",
+    "showHow": "",
+    "hide": "",
+    "titleDatabase": "",
+    "titleData": "",
+    "fields": {
+      "postgres": "",
+      "redis": "",
+      "appData": ""
+    },
+    "isSetTo": "",
+    "overheadDatabase": "",
+    "overheadData": "",
+    "pool": {
+      "alreadyDatabase": "",
+      "alreadyData": "",
+      "alreadyPools": "",
+      "openEdit": "",
+      "change": "",
+      "copyPath": "",
+      "apply": "",
+      "clears": ""
+    },
+    "split": {
+      "arrayDatabase": "",
+      "arrayData": "",
+      "poolsDatabase": "",
+      "poolsData": "",
+      "stop": "",
+      "shares": "",
+      "move": "",
+      "start": ""
+    },
+    "unknown": {
+      "isSetToDatabase": "",
+      "isSetToData": "",
+      "otherFuseDatabase": "",
+      "otherFuseData": "",
+      "fixDatabase": "",
+      "fixData": ""
+    },
+    "faq": ""
   },
   "backup": {
     "title": "",

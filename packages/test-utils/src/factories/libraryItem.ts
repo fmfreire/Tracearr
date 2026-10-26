@@ -24,6 +24,7 @@ export interface LibraryItemData {
   grandparentTitle?: string | null;
   parentTitle?: string | null;
   grandparentRatingKey?: string | null;
+  parentTitle?: string | null;
   parentRatingKey?: string | null;
   parentIndex?: number | null;
   itemIndex?: number | null;
@@ -71,6 +72,7 @@ export function buildLibraryItem(data: LibraryItemData): Required<LibraryItemDat
     grandparentTitle: data.grandparentTitle ?? null,
     parentTitle: data.parentTitle ?? null,
     grandparentRatingKey: data.grandparentRatingKey ?? null,
+    parentTitle: data.parentTitle ?? null,
     parentRatingKey: data.parentRatingKey ?? null,
     parentIndex: data.parentIndex ?? null,
     itemIndex: data.itemIndex ?? null,

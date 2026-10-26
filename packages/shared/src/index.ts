@@ -26,8 +26,14 @@ export type {
   SetupStatus,
   UserLocation,
   UserDevice,
+  MediaDownloadRow,
+  MediaDownloadSource,
+  DownloadsStats,
   UserMergeResult,
   ServerUserSplitResult,
+  OwnerLinkBlockedReason,
+  OwnerLinkCandidate,
+  OwnerLinkServer,
   MergeSuggestionIdentity,
   MergeSuggestion,
   DismissedMergeSuggestion,
@@ -68,8 +74,11 @@ export type {
   PlayStats,
   UserStats,
   LocationStats,
+  LocationUserInfo,
   LocationStatsSummary,
+  LocationFilterOptions,
   LocationStatsResponse,
+  LocationPeopleResponse,
   LibraryStats,
   DayOfWeekStats,
   HourOfDayStats,
@@ -98,6 +107,9 @@ export type {
   LoginMethods,
   UnitSystem,
   ImageCacheStatus,
+  StorageMountKey,
+  StorageMountIssue,
+  StorageWarning,
   // Tailscale
   TailscaleStatus,
   TailscaleExitNode,
@@ -244,16 +256,9 @@ export type {
   StaleItem,
   StaleSummary,
   StaleResponse,
-  WatchItem,
+  CompletionCounts,
   WatchSummary,
   WatchResponse,
-  CompletionStatus,
-  CompletionItem,
-  SeasonCompletion,
-  SeriesCompletion,
-  CompletionSummary,
-  CompletionPaginationInfo,
-  CompletionResponse,
   WatchedState,
   CatalogRowServerEntry,
   CatalogRow,
@@ -302,12 +307,11 @@ export type {
   MediaSeasonHeatResponse,
   BingeShow,
   HourlyDistribution,
-  MonthlyTrend,
+  TrendBucket,
+  TrendPoint,
   PatternsResponse,
-  ValueCategory,
   RoiItem,
   RoiSummary,
-  ValueThresholds,
   RoiResponse,
   TopMovie,
   TopMoviesSummary,
@@ -515,6 +519,8 @@ export {
   mergeSuggestionDismissalSchema,
   mergeSuggestionPairParamSchema,
   splitServerUserParamSchema,
+  ownerLinkBodySchema,
+  ownerLinkParamSchema,
   USER_SORT_FIELDS,
   userRosterFilterSchema,
   userListQuerySchema,
@@ -526,6 +532,7 @@ export {
   selfQuerySchema,
   filterOptionsQuerySchema,
   sessionIdParamSchema,
+  sessionDetailQuerySchema,
   terminateSessionBodySchema,
   // Rule
   impossibleTravelParamsSchema,
@@ -551,6 +558,7 @@ export {
   VIOLATION_SORT_FIELDS,
   violationRosterFilterSchema,
   violationQuerySchema,
+  violationCountQuerySchema,
   violationBulkBodySchema,
   violationIdParamSchema,
   // Stats
@@ -560,6 +568,7 @@ export {
   statPeriodSchema,
   dateValidationRefinements,
   statsQuerySchema,
+  downloadsListQuerySchema,
   PLAYS_MEDIA_GROUPS,
   playsBreakdownQuerySchema,
   playsQuerySchema,
@@ -568,6 +577,7 @@ export {
   peopleQuerySchema,
   userRangeStatsQuerySchema,
   locationStatsQuerySchema,
+  locationPeopleQuerySchema,
   // Settings
   updateSettingsSchema,
   // Tailscale
@@ -610,7 +620,6 @@ export {
   libraryWatchQuerySchema,
   libraryRoiQuerySchema,
   libraryPatternsQuerySchema,
-  libraryCompletionQuerySchema,
   topContentQuerySchema,
   shelvesQuerySchema,
 } from './schemas.js';
@@ -781,6 +790,7 @@ export type {
   PlaysMediaGroup,
   PeopleRank,
   LocationStatsQueryInput,
+  LocationPeopleQueryInput,
   UpdateSettingsInput,
   TautulliImportInput,
   // Jellystat types
@@ -811,7 +821,6 @@ export type {
   LibraryWatchQueryInput,
   LibraryRoiQueryInput,
   LibraryPatternsQueryInput,
-  LibraryCompletionQueryInput,
   TopContentQueryInput,
   ShelvesQueryInput,
   // Session target type
@@ -915,6 +924,9 @@ export {
 
 // Session constants
 export { MEDIA_TYPES, DEFAULT_STREAM_DETAILS } from './types.js';
+
+// Map constants
+export { LOCATION_LIST_PEOPLE } from './types.js';
 
 // Backup constants
 export { RESTORE_PHASES } from './types.js';

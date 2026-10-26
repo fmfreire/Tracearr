@@ -17,6 +17,7 @@ import {
   enqueueMaintenanceJob,
   enqueueServerLocationSyncIfBehind,
 } from '../jobs/maintenanceQueue.js';
+import { importIdentityByKey } from './import/libraryKeyMatch.js';
 import {
   batchGetLibraryItemIdentity,
   batchResolveMediaByPlexGuid,
@@ -40,6 +41,7 @@ import {
   getServerTrackingStart,
   queryExistingByExternalIds,
   queryExistingByTimeKeys,
+  storedSessionRowById,
   type SessionUpdate,
   type TimeBounds,
 } from './import/index.js';
@@ -1068,10 +1070,13 @@ export class TautulliService {
         for (const record of validRecords) {
           const ratingKeyStr =
             typeof record.rating_key === 'number' ? String(record.rating_key) : null;
-          const identity = ratingKeyStr ? identityByRatingKey.get(ratingKeyStr) : undefined;
+          const mappedType = mapTautulliMediaType(record);
+          const identity = importIdentityByKey(
+            ratingKeyStr ? identityByRatingKey.get(ratingKeyStr) : undefined,
+            { mediaType: mappedType, title: record.title, year: record.year || null }
+          );
           if (identity !== undefined) continue;
 
-          const mappedType = mapTautulliMediaType(record);
           if (mappedType !== 'movie' && mappedType !== 'episode') continue;
 
           const normalizedGuid = normalizePlexGuid(record.guid);
@@ -1167,6 +1172,7 @@ export class TautulliService {
             if (startsMatch && hasChanges) {
               updateBatch.push({
                 id: existingByRef.id,
+                startedAt: existingByRef.startedAt,
                 stoppedAt: newStoppedAt,
                 durationMs: newDurationMs,
                 pausedDurationMs: newPausedDurationMs,
@@ -1224,6 +1230,7 @@ export class TautulliService {
               ) {
                 updateBatch.push({
                   id: existingByTime.id,
+                  startedAt: existingByTime.startedAt,
                   externalSessionId: referenceIdStr,
                   stoppedAt: newStoppedAt,
                   durationMs: newDurationMs,
@@ -1278,7 +1285,10 @@ export class TautulliService {
           // Track this insert to prevent duplicates within this import run
           insertedThisRun.add(referenceIdStr);
 
-          const identity = ratingKeyStr ? identityByRatingKey.get(ratingKeyStr) : undefined;
+          const identity = importIdentityByKey(
+            ratingKeyStr ? identityByRatingKey.get(ratingKeyStr) : undefined,
+            { mediaType, title: record.title, year: record.year || null }
+          );
           const normalizedGuid = identity !== undefined ? null : normalizePlexGuid(record.guid);
           const guidIdentity =
             normalizedGuid && normalizedGuid.mediaType === mediaType
@@ -1839,13 +1849,13 @@ export class TautulliService {
         if (pendingUpdates.length > 0) {
           await db.transaction(async (tx) => {
             // The cap on decompressed tuples is per transaction, so it adds up
-            // across every UPDATE below, and `WHERE id = ?` matches no
+            // across every UPDATE below, and the id plus started_at match no
             // segmentby column - each row decompresses its segment. Enrichment
             // ran uncapped before the cap came back globally; keep that, scoped
             // to this transaction.
             await uncapDecompressionForTx(tx);
             for (const update of pendingUpdates) {
-              await tx.update(sessions).set(update.data).where(eq(sessions.id, update.id));
+              await tx.update(sessions).set(update.data).where(storedSessionRowById(update));
             }
           });
           for (const update of pendingUpdates) {

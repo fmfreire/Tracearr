@@ -86,6 +86,11 @@
         "seeAll": "",
         "availableThisWeek_other": ""
       },
+      "link": {
+        "title": "",
+        "description": "",
+        "action": ""
+      },
       "episodes_other": ""
     },
     "resources": {
@@ -276,7 +281,8 @@
       "viewAsHint": ""
     },
     "tabs": {
-      "access": ""
+      "access": "",
+      "downloads": ""
     },
     "cards": {
       "vsPrior": "",
@@ -521,14 +527,8 @@
         },
         "columns": {
           "hoursPerGb": "",
-          "value": ""
-        },
-        "category": {
-          "low": "",
-          "moderate": "",
-          "high": ""
-        },
-        "deletionSuggested": ""
+          "lastWatched": ""
+        }
       },
       "matchBadge": {
         "exact": "",
@@ -548,7 +548,7 @@
       "peakHour": "Huippu Tunti",
       "viewingHours": "Katselemassa Tuntia",
       "peak": "Huippu:",
-      "monthlyTrends": "Kuukausittaiset Suuntaukset",
+      "viewingTrend": "",
       "busiest": "Mutta:",
       "quietest": "Kysely:",
       "bingeHighlights": "Ahmimiskatselun kohokohdat",
@@ -570,12 +570,6 @@
         "empty": {
           "title": "",
           "description": ""
-        },
-        "tiers": {
-          "highlyAddictive": "",
-          "addictive": "",
-          "bingeable": "",
-          "casual": ""
         }
       },
       "percentWatchedValue": "",
@@ -677,8 +671,7 @@
         "empty": {
           "title": "",
           "description": ""
-        },
-        "uniqueItems_other": ""
+        }
       },
       "growth": {
         "empty": {
@@ -847,6 +840,12 @@
         "platform": "Alusta",
         "product": "Sovellus",
         "location": "Sijainti"
+      },
+      "download": {
+        "title": "",
+        "app": "",
+        "device": "",
+        "last24h": ""
       },
       "trust": {
         "previous": "Edellinen pistemäärä",
@@ -1281,6 +1280,7 @@
         "accountInactiveFor": "tili on ollut käyttämätön {{duration}}",
         "accountNewDevice": "tili toistaa uuden laitteen kautta",
         "accountTrustChanged": "tilin luottamuspisteet muuttuvat",
+        "accountMediaDownloaded": "",
         "mediaAdded": "mediaa on lisätty",
         "mediaUpgraded": "mediaa on päivitetty",
         "serverDown": "palvelin menee alas",
@@ -1309,6 +1309,8 @@
         "travel_speed_kmh": "matkanopeus",
         "unique_ips_in_window": "IP-osoitteiden määrä",
         "unique_devices_in_window": "laitteiden määrä",
+        "downloads_in_window": "",
+        "download_bytes_in_window": "",
         "inactive_days": "viimeisestä striimistä kulunut aika",
         "current_pause_minutes": "nykyinen tauko",
         "total_pause_minutes": "koko taukoaika",
@@ -1489,6 +1491,14 @@
       "unique_devices_in_window": {
         "label": "Yksilölliset laitteet aikaikkunassa",
         "description": "Yksilöllisten laitteiden määrä aikaikkunassa"
+      },
+      "downloads_in_window": {
+        "label": "",
+        "description": ""
+      },
+      "download_bytes_in_window": {
+        "label": "",
+        "description": ""
       },
       "inactive_days": {
         "label": "Päivää passiivisena",
@@ -1882,6 +1892,11 @@
         "description": "",
         "keywords": ""
       },
+      "download-burst": {
+        "name": "",
+        "description": "",
+        "keywords": ""
+      },
       "geo-restriction": {
         "name": "Estetyt maat",
         "description": "",
@@ -2044,6 +2059,10 @@
           "description": "",
           "synonyms": ""
         },
+        "accountMediaDownloaded": {
+          "description": "",
+          "synonyms": ""
+        },
         "mediaAdded": {
           "description": "",
           "synonyms": ""
@@ -2187,6 +2206,9 @@
         "authToken": "Todennustoken",
         "userKey": "Käyttäjän avain",
         "apiToken": "API-token",
+        "botToken": "",
+        "chatId": "",
+        "topicId": "",
         "preset": "Tarjoaja",
         "host": "SMTP-isäntä",
         "port": "Portti",
@@ -2208,6 +2230,7 @@
       },
       "hints": {
         "authTokenOptional": "Valinnainen julkisiin aiheisiin",
+        "telegramTopic": "",
         "smtpPreset": "",
         "smtpVerifyCertificate": "",
         "smtpUsernameOptional": "Jätä tyhjäksi, kun palvelin ei tarvitse sisäänkirjautumista",
@@ -2265,6 +2288,7 @@
         "gotify": "Gotify",
         "apprise": "Apprise",
         "pushover": "Pushover",
+        "telegram": "",
         "email": "Sähköposti",
         "push": "Mobiili push-ilmoitus",
         "webToast": "Selaimen ponnahdusilmoitukset"
@@ -2327,7 +2351,23 @@
     "loadingData": "",
     "noDataForFilters": "",
     "totalStreams": "",
-    "streamCount_other": ""
+    "byStreams": "",
+    "noMapPosition": "",
+    "allLocations": "",
+    "people": "",
+    "devices": "",
+    "latestStreams": "",
+    "firstSeen": "",
+    "lastSeen": "",
+    "areaName": "",
+    "areaPlaces": "",
+    "noneInView": "",
+    "showAll": "",
+    "streamCount_other": "",
+    "peopleCount_other": "",
+    "viewInHistory_other": "",
+    "streamsAcrossPlaces_other": "",
+    "inViewCount_other": ""
   },
   "devices": {
     "analyzedSessions": "Analysoidut istunnot",
@@ -2352,6 +2392,19 @@
     "directPlayLow": "<50%",
     "analyzedSessionsTooltip_one": "",
     "analyzedSessionsTooltip_other": ""
+  },
+  "downloads": {
+    "dataDownloaded": "",
+    "peopleDownloading": "",
+    "mostDownloaded": "",
+    "unknownUser": "",
+    "appOnDevice": "",
+    "deliveredAs": "",
+    "deliveredAsFormat": "",
+    "deliveredAtBitrate": "",
+    "empty": "",
+    "panelTitle": "",
+    "requests_other": ""
   },
   "statsBandwidth": {
     "dataTransferred": "Siirretty Tiedosto",

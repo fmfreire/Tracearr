@@ -5,6 +5,7 @@ export {
   useMyTopTitles,
   usePlaysStats,
   useLocationStats,
+  useLocationPeople,
   usePlaysByDayOfWeek,
   usePlaysByHourOfDay,
   usePlatformStats,
@@ -19,6 +20,7 @@ export {
   useDeviceCompatibilityMatrix,
   useDeviceHealth,
   useTranscodeHotspots,
+  useDownloadsStats,
   // Bandwidth stats
   useBandwidthDaily,
   useBandwidthSummary,
@@ -54,6 +56,7 @@ export {
   useUserFull,
   useUserRangeStats,
   useUserSessions,
+  useUserDownloads,
   useUpdateUser,
   useUpdateUserIdentity,
   useUpdateUserAccess,
@@ -67,6 +70,9 @@ export {
   useRestoreMergeSuggestion,
   useMergeUsers,
   useSplitServerUser,
+  useOwnerLinks,
+  useLinkOwnerAccount,
+  useUnlinkOwnerAccount,
 } from './useUsers';
 
 // Automation hooks
@@ -133,6 +139,8 @@ export {
   useApiKey,
   useRegenerateApiKey,
   useImageCacheStatus,
+  useStorageWarning,
+  useDismissStorageWarning,
 } from './useSettings';
 
 // Destination hooks
@@ -231,7 +239,6 @@ export {
   useLibraryDuplicates,
   useLibraryStale,
   useLibraryWatch,
-  useLibraryCompletion,
   useLibraryPatterns,
   useLibraryRoi,
   useTopMovies,

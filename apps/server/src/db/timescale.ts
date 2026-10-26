@@ -9,7 +9,7 @@ import { createRawPgClient, db, recreatePool } from './client.js';
 import { sql, type SQL } from 'drizzle-orm';
 import type pg from 'pg';
 import { PRIMARY_MEDIA_TYPES_SQL_LITERAL } from '../constants/mediaTypes.js';
-import { countedSession, countedSessionSql } from '../constants/sessions.js';
+import { countedSession, countedSessionSql } from './sessions/rules.js';
 
 /**
  * Schema version for continuous aggregate definitions.
@@ -83,7 +83,7 @@ function getAggregateDefinitions(): AggregateDefinition[] {
 
   return [
     {
-      // Used by: /stats/engagement, /library/completion, /library/patterns
+      // Used by: /stats/engagement, /stats/me, /library/top-movies, /library/top-shows
       name: 'daily_content_engagement',
       sql: `
         CREATE MATERIALIZED VIEW IF NOT EXISTS daily_content_engagement
@@ -718,6 +718,10 @@ async function convertToHypertable(): Promise<void> {
     )
   `);
 
+  // create_hypertable builds this default index; idx_sessions_time_play_id
+  // already leads with started_at DESC
+  await db.execute(sql`DROP INDEX IF EXISTS sessions_started_at_idx`);
+
   // Create expression indexes for COALESCE(reference_id, id) pattern
   // This pattern is used throughout the codebase for play grouping
   await db.execute(sql`
@@ -755,8 +759,8 @@ async function createPartialIndexes(): Promise<void> {
   await db.execute(sql`DROP INDEX IF EXISTS idx_automation_runs_unacked_list`);
 
   // idx_sessions_active_partial removed - live "now playing" reads come from the
-  // Redis cache, and the one matching query (violations detail) plans onto the
-  // server_user time index instead
+  // Redis cache, and violations detail reads its sessions by id through
+  // sessions_pkey
 
   // Partial index for the stale-session sweep: open rows only, so the
   // sweep's lastSeenAt filter never seq-scans the current 30-day chunk
@@ -770,25 +774,11 @@ async function createPartialIndexes(): Promise<void> {
   // run retention filters on kind and finished_at, and no other read wants it
   await db.execute(sql`DROP INDEX IF EXISTS idx_automation_runs_dismissed_partial`);
 
-  // Partial index for transcoded sessions (quality analysis)
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS idx_sessions_transcode_partial
-    ON sessions (started_at DESC, quality, bitrate)
-    WHERE is_transcode = true
-  `);
-
   // Partial index for music track queries (artist, album lookups)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_sessions_music_partial
     ON sessions (started_at DESC, artist_name, album_name)
     WHERE media_type = 'track'
-  `);
-
-  // Partial index for live TV queries (channel lookups)
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS idx_sessions_live_tv_partial
-    ON sessions (started_at DESC, channel_identifier, channel_title)
-    WHERE media_type = 'live'
   `);
 }
 
@@ -1124,6 +1114,21 @@ export async function getSessionsCompressionHorizon(): Promise<Date | null> {
   `);
   const horizon = (result.rows[0] as { horizon: string | Date | null } | undefined)?.horizon;
   return horizon ? new Date(horizon) : null;
+}
+
+const HORIZON_CACHE_TTL_MS = 60_000;
+let horizonCache: { value: Date | null; expiresAt: number } | null = null;
+
+/**
+ * Poller-only variant of getSessionsCompressionHorizon. A horizon up to a minute
+ * old only makes the stale sweep read one compressed chunk; callers that write
+ * history (library sync backfill) must use the uncached read.
+ */
+export async function getCachedSessionsCompressionHorizon(): Promise<Date | null> {
+  if (horizonCache && horizonCache.expiresAt > Date.now()) return horizonCache.value;
+  const value = await getSessionsCompressionHorizon();
+  horizonCache = { value, expiresAt: Date.now() + HORIZON_CACHE_TTL_MS };
+  return value;
 }
 
 export const MAX_TUPLES_DECOMPRESSED_GUC =
@@ -1812,9 +1817,13 @@ export async function checkAggregateNeedsRebuild(): Promise<{
 const TIMESCALE_STATUS_CACHE_TTL_MS = 5 * 60 * 1000;
 let timescaleStatusCache: { value: TimescaleStatus; expiresAt: number } | null = null;
 
-/** Drop the cached TimescaleDB status. Call after DDL that changes topology. */
+/**
+ * Drop the cached TimescaleDB status and the cached compression horizon. Call
+ * after DDL that changes topology or compresses/decompresses chunks.
+ */
 export function invalidateTimescaleStatusCache(): void {
   timescaleStatusCache = null;
+  horizonCache = null;
 }
 
 async function computeTimescaleStatus(): Promise<TimescaleStatus> {
@@ -1837,6 +1846,24 @@ async function computeTimescaleStatus(): Promise<TimescaleStatus> {
     continuousAggregates: await getContinuousAggregates(),
     chunkCount: await getChunkCount(),
   };
+}
+
+/**
+ * Names of the sessions continuous aggregates whose defining query reads any of these sessions
+ * columns, from the catalog's dependency entries on the aggregate's direct view. A whole-row
+ * reference (refobjsubid = 0) is not detected, so an aggregate reading the whole row must not rely on this.
+ */
+export async function aggregatesReadingSessionColumns(columns: string[]): Promise<string[]> {
+  const result = await db.execute(sql`
+    SELECT DISTINCT c.user_view_name AS name
+    FROM _timescaledb_catalog.continuous_agg c
+    JOIN pg_rewrite r ON r.ev_class = format('%I.%I', c.direct_view_schema, c.direct_view_name)::regclass
+    JOIN pg_depend d ON d.classid = 'pg_rewrite'::regclass AND d.objid = r.oid
+      AND d.refclassid = 'pg_class'::regclass AND d.refobjid = 'sessions'::regclass
+    JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+    WHERE a.attname = ANY(${sql.param(columns)}::text[])
+  `);
+  return (result.rows as { name: string }[]).map((row) => row.name);
 }
 
 /**
@@ -2208,6 +2235,10 @@ export async function initTimescaleDB(): Promise<{
     } else {
       actions.push('Compression already enabled with correct settings');
     }
+    // withSessionsCompressionPaused removes the policy for the length of an import or walk
+    // and only a clean finish puts it back. compression_enabled stays true without it, so a
+    // kill mid-run would otherwise leave old chunks uncompressed until someone noticed.
+    await addSessionsCompressionPolicy();
   }
 
   // Create partial indexes for optimized filtered queries

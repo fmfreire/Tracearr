@@ -10,10 +10,11 @@
  * Used by both Tautulli and Jellystat importers.
  */
 
-import { eq } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { sessions } from '../../db/schema.js';
+import { storedSessionRowById } from '../../db/sessions/row.js';
 import { uncapDecompressionForTx } from '../../db/timescale.js';
+import { resolveImportedPlays } from '../library/importedPlayIdentity.js';
 import { normalizeClient, normalizePlatformName } from '../../utils/platformNormalizer.js';
 import { scrubStringFields } from '../../utils/sanitizeText.js';
 
@@ -31,6 +32,8 @@ export type NewSession = typeof sessions.$inferInsert;
  */
 export interface SessionUpdate {
   id: string;
+  /** The stored row's started_at, used only to locate the row */
+  startedAt: Date;
   externalSessionId?: string;
   stoppedAt?: Date;
   durationMs?: number;
@@ -82,6 +85,25 @@ function normalizeSessionFields(session: NewSession): NewSession {
 }
 
 /**
+ * Imported plays whose rating key found no library item still get a media identity, the way
+ * a live play does at insert: the rows with none are resolved by title, year and numbers.
+ */
+async function stampImportedIdentity(rows: NewSession[]): Promise<void> {
+  const pending = rows.filter(
+    (row) =>
+      row.mediaId == null &&
+      row.externalSessionId != null &&
+      (row.mediaType === 'movie' || row.mediaType === 'episode')
+  );
+  if (pending.length === 0) return;
+  const { identities } = await resolveImportedPlays(pending);
+  for (const [row, identity] of identities) {
+    row.mediaId = identity.mediaId;
+    row.showMediaId = identity.showMediaId;
+  }
+}
+
+/**
  * Insert sessions in chunks to avoid Drizzle ORM stack overflow
  *
  * Automatically normalizes device/platform fields before insert.
@@ -102,6 +124,7 @@ export async function flushInsertBatch(
   const normalizedSessions = sessionsToInsert.map((s) =>
     scrubStringFields(normalizeSessionFields(s))
   );
+  await stampImportedIdentity(normalizedSessions);
 
   for (let i = 0; i < normalizedSessions.length; i += chunkSize) {
     const chunk = normalizedSessions.slice(i, i + chunkSize);
@@ -147,8 +170,8 @@ export async function flushUpdateBatch(
 
     await Promise.all(
       chunk.map((update) => {
-        const { id, ...data } = update;
-        return db.update(sessions).set(data).where(eq(sessions.id, id));
+        const { id, startedAt, ...data } = update;
+        return db.update(sessions).set(data).where(storedSessionRowById({ id, startedAt }));
       })
     );
 

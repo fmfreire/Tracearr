@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
+import { fromIsoDate, nextLocalDay, safeParseDate, toIsoDate, utcDayStart } from '@/lib/dateFormat';
 import type { TimeRangePeriod, TimeRangeValue } from '@/components/ui/time-range-picker';
 
 const DEFAULT_PERIOD: TimeRangePeriod = 'month';
@@ -23,14 +24,6 @@ export interface ApiLibraryParams {
   period: ReturnType<typeof toApiPeriod>;
   startDate?: string;
   endDate?: string;
-}
-
-// The library aggregates are UTC-day rows, so a picked calendar day goes to the server as
-// that day's UTC midnight whatever zone the browser is in.
-export function utcDayStart(date: Date, plusDays = 0): string {
-  return new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate() + plusDays)
-  ).toISOString();
 }
 
 export function toApiLibraryParams(value: TimeRangeValue): ApiLibraryParams {
@@ -59,21 +52,30 @@ export function toApiDayParams(value: TimeRangeValue): {
   };
 }
 
-const DAY_PARAM = /^(\d{4})-(\d{2})-(\d{2})$/;
+const PRESET_DAYS: Partial<Record<TimeRangePeriod, number>> = {
+  day: 1,
+  week: 7,
+  month: 30,
+  year: 365,
+};
 
-function parseDate(dateStr: string | null): Date | undefined {
-  if (!dateStr) return undefined;
-  const day = DAY_PARAM.exec(dateStr);
-  const date = day
-    ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]))
-    : new Date(dateStr);
-  return isNaN(date.getTime()) ? undefined : date;
-}
+export type DateWindow = { startDate: Date; endDate?: Date } | null;
 
-function formatDateParam(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
+/**
+ * The window History queries for a range, from apiParams, so its end is already exclusive. A
+ * preset counts back from now and has no end, so a refetch still finds sessions started after
+ * the window was computed.
+ */
+export function resolveWindow(
+  period: TimeRangePeriod,
+  startDate: string | undefined,
+  endDate: string | undefined
+): DateWindow {
+  if (startDate && endDate) {
+    return { startDate: new Date(startDate), endDate: new Date(endDate) };
+  }
+  if (period === 'all') return null;
+  return { startDate: new Date(Date.now() - (PRESET_DAYS[period] ?? 30) * 86_400_000) };
 }
 
 export function useTimeRange() {
@@ -83,8 +85,9 @@ export function useTimeRange() {
     const period = (searchParams.get('period') as TimeRangePeriod) || DEFAULT_PERIOD;
 
     if (period === 'custom') {
-      const startDate = parseDate(searchParams.get('from'));
-      const endDate = parseDate(searchParams.get('to'));
+      const [startDate, endDate] = [searchParams.get('from'), searchParams.get('to')].map(
+        (param) => fromIsoDate(param) ?? safeParseDate(param) ?? undefined
+      );
 
       // If custom period but missing dates, fall back to default
       if (!startDate || !endDate) {
@@ -106,8 +109,8 @@ export function useTimeRange() {
           params.set('period', newValue.period);
 
           if (newValue.period === 'custom' && newValue.startDate && newValue.endDate) {
-            params.set('from', formatDateParam(newValue.startDate));
-            params.set('to', formatDateParam(newValue.endDate));
+            params.set('from', toIsoDate(newValue.startDate));
+            params.set('to', toIsoDate(newValue.endDate));
           } else {
             params.delete('from');
             params.delete('to');
@@ -121,13 +124,13 @@ export function useTimeRange() {
     [setSearchParams]
   );
 
-  // Helper to get API params for backend calls
+  // The session routes read [startDate, endDate), so the end is the day after the last picked one
   const apiParams = useMemo(() => {
     if (value.period === 'custom' && value.startDate && value.endDate) {
       return {
         period: value.period,
         startDate: value.startDate.toISOString(),
-        endDate: value.endDate.toISOString(),
+        endDate: nextLocalDay(value.endDate).toISOString(),
       };
     }
     return { period: value.period };

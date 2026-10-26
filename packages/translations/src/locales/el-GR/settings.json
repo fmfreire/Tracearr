@@ -59,6 +59,11 @@
     "timeFormatDescription": "Επιλέξτε τον τρόπο εμφάνισης των χρόνων.",
     "timeFormat12h": "12-ωρη (1:30 μ.μ.)",
     "timeFormat24h": "24-ωρη (13:30)",
+    "dateFormat": "",
+    "dateFormatDescription": "",
+    "weekStart": "",
+    "weekStartDescription": "",
+    "automatic": "",
     "theme": "Θέμα",
     "accentColor": "Χρώμα Έμφασης",
     "default": "(προεπιλογή)",
@@ -251,6 +256,29 @@
       "installed": "",
       "upToDate": "",
       "updateAvailable": ""
+    },
+    "ownerAccount": {
+      "label": "",
+      "link": "",
+      "unlink": "",
+      "dialog": {
+        "title": "",
+        "description": "",
+        "admin": "",
+        "lastActive": "",
+        "neverActive": "",
+        "otherAccounts": "",
+        "signsIn": "",
+        "warningTitle": "",
+        "warning": "",
+        "warning_jellyfin": "",
+        "confirmLabel": "",
+        "submit": ""
+      },
+      "confirmUnlink": {
+        "title": "",
+        "body": ""
+      }
     }
   },
   "mobile": {
@@ -520,6 +548,51 @@
   "ipWarning": {
     "message": "Όλοι οι χρήστες φαίνεται να χρησιμοποιούν την ίδια διεύθυνση IP ή IP τοπικού δικτύου. Αυτό μπορεί να επηρεάσει τη λογική βάσει κανόνων για την τοποθεσία ή τις διευθύνσεις IP.",
     "acknowledge": "Το κατάλαβα"
+  },
+  "storageWarning": {
+    "bannerDatabase": "",
+    "bannerData": "",
+    "showHow": "",
+    "hide": "",
+    "titleDatabase": "",
+    "titleData": "",
+    "fields": {
+      "postgres": "",
+      "redis": "",
+      "appData": ""
+    },
+    "isSetTo": "",
+    "overheadDatabase": "",
+    "overheadData": "",
+    "pool": {
+      "alreadyDatabase": "",
+      "alreadyData": "",
+      "alreadyPools": "",
+      "openEdit": "",
+      "change": "",
+      "copyPath": "",
+      "apply": "",
+      "clears": ""
+    },
+    "split": {
+      "arrayDatabase": "",
+      "arrayData": "",
+      "poolsDatabase": "",
+      "poolsData": "",
+      "stop": "",
+      "shares": "",
+      "move": "",
+      "start": ""
+    },
+    "unknown": {
+      "isSetToDatabase": "",
+      "isSetToData": "",
+      "otherFuseDatabase": "",
+      "otherFuseData": "",
+      "fixDatabase": "",
+      "fixData": ""
+    },
+    "faq": ""
   },
   "backup": {
     "title": "Αντίγραφα Ασφαλείας",

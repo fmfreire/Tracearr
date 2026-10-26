@@ -7,7 +7,7 @@
  * - never_watched: Content added but never played (no sessions)
  * - stale: Content watched but not revisited in N days
  *
- * Uses LEFT JOIN with sessions table to determine watch history,
+ * Sessions are aggregated once per server and rating key, then joined to the items,
  * with configurable staleness threshold (default 90 days).
  */
 
@@ -19,7 +19,7 @@ import {
   libraryStaleQuerySchema,
   type LibraryStaleQueryInput,
 } from '@tracearr/shared';
-import { countedSessionSql } from '../../constants/index.js';
+import { countedSessionSql } from '../../db/sessions/rules.js';
 import { db } from '../../db/client.js';
 import { resolveServerIds, buildMultiServerFragment } from '../../utils/serverFiltering.js';
 import { resolutionRankSql } from '../../utils/resolutionBuckets.js';
@@ -143,6 +143,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
 
       // Build filters
       const serverFilter = buildMultiServerFragment(resolvedIds, 'li.server_id');
+      const sessionServerFilter = buildMultiServerFragment(resolvedIds, 'sess.server_id');
       const libraryFilter = libraryId ? sql`AND li.library_id = ${libraryId}` : sql``;
       const mediaTypeFilter = mediaType ? sql`AND li.media_type = ${mediaType}` : sql``;
 
@@ -168,17 +169,17 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
 
       const offset = (page - 1) * pageSize;
 
-      // Combined query: items with pagination AND summary statistics in one round-trip
-      // Uses window functions for summary aggregation alongside item results
-      const combinedResult = await db.execute(sql`
-        WITH top_items AS (
+      // Watch state and bytes per identity, shared by the page and the empty-page summary
+      const identCtes = sql`
+        top_items AS (
           -- Every top-level entry with its identity key. A title merged
           -- across libraries or servers has several entries sharing one
-          -- ident; unmatched items fall back to their own id.
+          -- ident, a merged loser folds to its winner, and unmatched items
+          -- fall back to their own id.
           SELECT li.id, li.server_id, li.library_id, li.rating_key, li.title,
                  li.media_type, li.year, li.video_resolution, li.created_at,
                  COALESCE(m.sort_title, lower(li.title)) AS sort_key,
-                 COALESCE(li.media_id::text, li.id::text) AS ident
+                 COALESCE(m.merged_into_id::text, li.media_id::text, li.id::text) AS ident
           FROM library_items li
           LEFT JOIN media m ON m.id = li.media_id
           WHERE li.media_type NOT IN ('episode', 'track', 'season', 'album')  -- Exclude children/containers, only show content
@@ -187,7 +188,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             ${libraryFilter}
             ${mediaTypeFilter}
         ),
-        ident_sizes AS (
+        ident_sizes AS MATERIALIZED (
           -- Physical bytes per identity: the entries' own versions for
           -- movies, children's versions for shows/artists, mirror-deduped by
           -- (ident, byte size) - the same heuristic the storage totals use,
@@ -206,24 +207,54 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           ) d
           GROUP BY ident
         ),
-        ident_watch AS (
-          -- Watch state per identity: a play on ANY entry (or any entry's
-          -- children) counts for the title
-          SELECT b.ident,
-                 MAX(sess.stopped_at) AS last_watched,
-                 COUNT(DISTINCT COALESCE(sess.reference_id, sess.id))
-                   FILTER (WHERE sess.id IS NOT NULL)::int AS watch_count
-          FROM top_items b
-          LEFT JOIN library_items child ON b.media_type IN ('show', 'artist')
-            AND child.grandparent_rating_key = b.rating_key
-            AND child.server_id = b.server_id
-            AND child.removed_at IS NULL
-          LEFT JOIN sessions sess ON sess.server_id = b.server_id
-            AND sess.rating_key = COALESCE(child.rating_key, b.rating_key)
-            AND ${countedSessionSql('sess')}
-          GROUP BY b.ident
+        ident_keys AS MATERIALIZED (
+          -- The rating keys whose plays count for an identity: each entry's
+          -- own key, or its children's for shows/artists. Tombstoned entries
+          -- of the same title are included, so plays recorded under a
+          -- re-added title's old key still count.
+          SELECT e.ident, e.server_id, COALESCE(child.rating_key, e.rating_key) AS rating_key
+          FROM (
+            SELECT ident, server_id, rating_key, media_type, false AS removed FROM top_items
+            UNION ALL
+            SELECT COALESCE(m.merged_into_id::text, li.media_id::text), li.server_id,
+                   li.rating_key, li.media_type, true
+            FROM library_items li
+            JOIN media m ON m.id = li.media_id
+            WHERE li.removed_at IS NOT NULL
+              AND li.media_type NOT IN ('episode', 'track', 'season', 'album')
+              AND COALESCE(m.merged_into_id::text, li.media_id::text) IN (SELECT ident FROM top_items)
+              ${serverFilter}
+          ) e
+          LEFT JOIN library_items child ON e.media_type IN ('show', 'artist')
+            AND child.grandparent_rating_key = e.rating_key
+            AND child.server_id = e.server_id
+            AND (child.removed_at IS NULL OR e.removed)
         ),
-        child_resolutions AS (
+        key_watch AS MATERIALIZED (
+          SELECT sess.server_id, sess.rating_key,
+                 MAX(sess.stopped_at) AS last_watched,
+                 COUNT(DISTINCT COALESCE(sess.reference_id, sess.id))::int AS watch_count
+          FROM sessions sess
+          WHERE sess.rating_key IS NOT NULL AND ${countedSessionSql('sess')}
+            ${sessionServerFilter}
+          GROUP BY sess.server_id, sess.rating_key
+        ),
+        ident_watch AS MATERIALIZED (
+          -- Resume linking only chains sessions with the same rating key, so
+          -- per-key sums equal one count per play
+          SELECT ik.ident, MAX(kw.last_watched) AS last_watched,
+                 COALESCE(SUM(kw.watch_count), 0)::int AS watch_count
+          FROM ident_keys ik
+          LEFT JOIN key_watch kw ON kw.server_id = ik.server_id AND kw.rating_key = ik.rating_key
+          GROUP BY ik.ident
+        )
+      `;
+
+      // Combined query: items with pagination AND summary statistics in one round-trip
+      // Uses window functions for summary aggregation alongside item results
+      const combinedResult = await db.execute(sql`
+        WITH ${identCtes},
+        child_resolutions AS MATERIALIZED (
           SELECT grandparent_rating_key, server_id,
             (ARRAY_AGG(video_resolution ORDER BY ${resolutionRankSql('video_resolution')} DESC))[1]
               AS best_resolution
@@ -242,9 +273,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           SELECT
             r.id,
             r.server_id,
-            s.name AS server_name,
             r.library_id,
-            s.name AS library_name,
             r.title,
             r.sort_key,
             r.media_type,
@@ -258,7 +287,6 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
             iw.last_watched,
             COALESCE(iw.watch_count, 0) AS watch_count
           FROM ident_reps r
-          JOIN servers s ON r.server_id = s.id
           LEFT JOIN ident_sizes isz ON isz.ident = r.ident
           LEFT JOIN ident_watch iw ON iw.ident = r.ident
           LEFT JOIN child_resolutions cr ON r.media_type IN ('show', 'artist')
@@ -269,9 +297,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           SELECT
             id,
             server_id,
-            server_name,
             library_id,
-            library_name,
             title,
             sort_key,
             media_type,
@@ -322,9 +348,9 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           -- Item fields
           pi.id,
           pi.server_id,
-          pi.server_name,
+          s.name AS server_name,
           pi.library_id,
-          pi.library_name,
+          COALESCE(l.name, s.name) AS library_name,
           pi.title,
           pi.media_type,
           pi.year,
@@ -343,6 +369,8 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
           ss.total_stale_items::text AS _total_stale_items,
           ss.total_stale_bytes::text AS _total_stale_bytes
         FROM paginated_items pi
+        JOIN servers s ON s.id = pi.server_id
+        LEFT JOIN libraries l ON l.server_id = pi.server_id AND l.library_id = pi.library_id
         CROSS JOIN summary_stats ss
         ORDER BY ${outerOrderByClause}
       `);
@@ -399,31 +427,7 @@ export const libraryStaleRoute: FastifyPluginAsync = async (app) => {
       } else {
         // No items on current page - need summary separately for empty page case
         const summaryResult = await db.execute(sql`
-          WITH top_items AS (
-            SELECT li.id, li.server_id, li.rating_key, li.media_type,
-              COALESCE(li.media_id::text, li.id::text) AS ident
-            FROM library_items li
-            WHERE li.media_type NOT IN ('episode', 'track', 'season', 'album') AND li.removed_at IS NULL ${serverFilter} ${libraryFilter} ${mediaTypeFilter}
-          ),
-          ident_sizes AS (
-            SELECT ident, SUM(sz) AS file_size FROM (
-              SELECT DISTINCT b.ident, v.file_size AS sz
-              FROM top_items b
-              LEFT JOIN library_items child ON b.media_type IN ('show', 'artist')
-                AND child.grandparent_rating_key = b.rating_key AND child.server_id = b.server_id AND child.removed_at IS NULL
-              JOIN library_item_versions v ON v.library_item_id = COALESCE(child.id, b.id)
-                AND v.removed_at IS NULL AND v.file_size IS NOT NULL
-            ) d GROUP BY ident
-          ),
-          ident_watch AS (
-            SELECT b.ident, MAX(sess.stopped_at) AS last_watched
-            FROM top_items b
-            LEFT JOIN library_items child ON b.media_type IN ('show', 'artist')
-              AND child.grandparent_rating_key = b.rating_key AND child.server_id = b.server_id AND child.removed_at IS NULL
-            LEFT JOIN sessions sess ON sess.server_id = b.server_id
-              AND sess.rating_key = COALESCE(child.rating_key, b.rating_key) AND ${countedSessionSql('sess')}
-            GROUP BY b.ident
-          ),
+          WITH ${identCtes},
           idents AS (SELECT DISTINCT ident FROM top_items),
           stale_items AS (
             SELECT i.ident AS id, isz.file_size,

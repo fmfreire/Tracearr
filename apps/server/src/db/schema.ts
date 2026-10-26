@@ -18,6 +18,7 @@ import {
   boolean,
   integer,
   bigint,
+  doublePrecision,
   real,
   jsonb,
   index,
@@ -83,6 +84,7 @@ import type {
   SubtitleInfo,
   AutomationConditions,
   AutomationActions,
+  MediaDownloadSource,
 } from '@tracearr/shared';
 
 // Re-export for consumers of this module
@@ -253,8 +255,6 @@ export const users = pgTable(
     index('users_aggregate_trust_idx').on(table.aggregateTrustScore.desc(), table.id),
     index('users_first_joined_idx').on(table.firstJoinedAt.desc().nullsLast(), table.id),
     index('users_last_activity_idx').on(table.lastActivityAt.desc().nullsLast(), table.id),
-    // Roster search matches users.name or any account's username
-    index('users_name_trgm_idx').using('gin', sql`${table.name} gin_trgm_ops`),
     check(
       'users_contact_email_lower',
       sql`${table.contactEmail} IS NULL OR ${table.contactEmail} = lower(${table.contactEmail})`
@@ -354,7 +354,6 @@ export const serverUsers = pgTable(
     index('server_users_user_idx').on(table.userId),
     index('server_users_server_idx').on(table.serverId),
     index('server_users_username_idx').on(table.username),
-    index('server_users_username_trgm_idx').using('gin', sql`${table.username} gin_trgm_ops`),
     // For Plex sync matching by plex.tv account ID
     index('server_users_plex_account_idx').on(table.serverId, table.plexAccountId),
     // For account inactivity rule queries
@@ -514,9 +513,6 @@ export const sessions = pgTable(
     subtitleInfo: jsonb('subtitle_info').$type<SubtitleInfo>(),
   },
   (table) => [
-    index('sessions_server_user_time_idx').on(table.serverUserId, table.startedAt),
-    index('sessions_server_time_idx').on(table.serverId, table.startedAt),
-    index('sessions_state_idx').on(table.state),
     // sessions_external_session_idx removed - the only predicates on external_session_id
     // (import cursor CAST, dedup regex) are non-sargable for a btree
     index('sessions_active_lookup_idx').on(table.serverId, table.sessionKey, table.stoppedAt),
@@ -534,9 +530,6 @@ export const sessions = pgTable(
     // Indexes for stats queries
     // sessions_geo_idx and sessions_geo_time_idx removed - every geo predicate carries
     // IS NOT NULL, so idx_sessions_geo_partial in timescale.ts covers them all
-    index('sessions_media_type_idx').on(table.mediaType), // For media type aggregations
-    index('sessions_transcode_idx').on(table.isTranscode), // For quality stats
-    index('sessions_platform_idx').on(table.platform), // For platform stats
     // sessions_top_movies_idx and sessions_top_shows_idx removed - superseded by time-prefixed variants in timescale.ts
     // Covering index for history aggregates queries (server + date range + reference_id for COUNT DISTINCT)
     index('idx_sessions_server_date_ref').on(table.serverId, table.startedAt, table.referenceId),
@@ -668,6 +661,9 @@ export const automationRuns = pgTable(
     // Nullable: null for account_inactivity rules (no associated session)
     // No FK: sessions is a hypertable, so timescale.ts drops the constraint at boot.
     sessionId: uuid('session_id'),
+    // The session's partition key, so a join back to it touches one chunk. Null on rows
+    // without a session, and on older diagnostics the backfill left to age out.
+    sessionStartedAt: timestamp('session_started_at', { withTimezone: true }),
     severity: varchar('severity', { length: 20 }).$type<(typeof violationSeverityEnum)[number]>(),
     // The server the run acted on; no FK, so a deleted server leaves its runs readable.
     serverId: uuid('server_id'),
@@ -726,6 +722,10 @@ export const automationRuns = pgTable(
     // The id column is the list's paging tiebreak, so the scan needs no sort on top.
     index('automation_runs_violation_alias_idx')
       .on(table.createdAt.desc().nullsFirst(), table.id)
+      .where(sql`kind = 'policy' AND outcome = 'completed'`),
+    // The identity violation recount and the account gate, without walking the diagnostics.
+    index('automation_runs_violation_account_idx')
+      .on(table.serverUserId, table.automationId)
       .where(sql`kind = 'policy' AND outcome = 'completed'`),
     // The runs list default sort; null placement and tiebreak match its ORDER BY.
     index('automation_runs_started_at_idx').on(table.startedAt.desc().nullsLast(), table.id),
@@ -788,7 +788,6 @@ export const mobileSessions = pgTable(
   (table) => [
     index('mobile_sessions_user_idx').on(table.userId),
     index('mobile_sessions_device_id_idx').on(table.deviceId),
-    index('mobile_sessions_refresh_token_idx').on(table.refreshTokenHash),
     index('mobile_sessions_expo_push_token_idx').on(table.expoPushToken),
     index('mobile_sessions_ba_session_idx').on(table.betterAuthSessionId),
   ]
@@ -837,7 +836,6 @@ export const notificationPreferences = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index('notification_prefs_mobile_session_idx').on(table.mobileSessionId),
     // Validate quiet hours format: HH:MM where HH is 00-23 and MM is 00-59
     check(
       'quiet_hours_start_format',
@@ -857,6 +855,7 @@ export const destinationKindEnum = [
   'gotify',
   'apprise',
   'pushover',
+  'telegram',
   'email',
   'push',
   'web_toast',
@@ -1088,6 +1087,8 @@ export const terminationLogs = pgTable(
     // (hypertables don't support foreign key references to their primary key)
     // The relationship is maintained via Drizzle ORM relations
     sessionId: uuid('session_id').notNull(),
+    // Null only on rows whose session was already gone when the column was filled
+    sessionStartedAt: timestamp('session_started_at', { withTimezone: true }),
     serverId: uuid('server_id')
       .notNull()
       .references(() => servers.id, { onDelete: 'cascade' }),
@@ -1126,6 +1127,64 @@ export const terminationLogs = pgTable(
     index('termination_logs_triggered_by_idx').on(table.triggeredByUserId),
     index('termination_logs_rule_idx').on(table.ruleId),
     index('termination_logs_created_at_idx').on(table.createdAt),
+  ]
+);
+
+// One item downloaded by one user; repeat requests within the collapse window update the row
+export const mediaDownloads = pgTable(
+  'media_downloads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    serverId: uuid('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    serverUserId: uuid('server_user_id').references(() => serverUsers.id, { onDelete: 'cascade' }),
+    libraryItemId: uuid('library_item_id').references(() => libraryItems.id, {
+      onDelete: 'set null',
+    }),
+    ratingKey: varchar('rating_key', { length: 255 }),
+    title: text('title').notNull(),
+    app: text('app'),
+    device: text('device'),
+    source: varchar('source', { length: 20 }).notNull().$type<MediaDownloadSource>(),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    requestCount: integer('request_count').notNull().default(1),
+    libraryItemVersionId: uuid('library_item_version_id').references(() => libraryItemVersions.id, {
+      onDelete: 'set null',
+    }),
+    videoResolution: varchar('video_resolution', { length: 20 }),
+    videoCodec: varchar('video_codec', { length: 50 }),
+    videoDynamicRange: varchar('video_dynamic_range', { length: 20 }),
+    container: varchar('container', { length: 50 }),
+    fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
+    ipAddress: varchar('ip_address', { length: 45 }),
+    isLocal: boolean('is_local'),
+    geoCity: text('geo_city'),
+    geoRegion: text('geo_region'),
+    geoCountry: text('geo_country'),
+    geoLat: doublePrecision('geo_lat'),
+    geoLon: doublePrecision('geo_lon'),
+    deliveredBytes: bigint('delivered_bytes', { mode: 'number' }),
+    // Stamped at insert from library_items like sessions.mediaId; survives item deletion
+    mediaId: uuid('media_id'),
+    deviceId: varchar('device_id', { length: 255 }),
+    playerName: varchar('player_name', { length: 255 }),
+    product: varchar('product', { length: 255 }),
+    platform: varchar('platform', { length: 100 }),
+    deliveredVideoCodec: varchar('delivered_video_codec', { length: 50 }),
+    deliveredAudioCodec: varchar('delivered_audio_codec', { length: 50 }),
+    deliveredContainer: varchar('delivered_container', { length: 50 }),
+    deliveredBitrateKbps: integer('delivered_bitrate_kbps'),
+    deliveredResolution: varchar('delivered_resolution', { length: 20 }),
+    // A converted pull's last non-null CompletionPercentage, rounded
+    completionPercent: integer('completion_percent'),
+  },
+  (t) => [
+    index('media_downloads_user_first_seen_idx').on(t.serverUserId, t.firstSeenAt),
+    index('media_downloads_server_item_last_seen_idx').on(t.serverId, t.ratingKey, t.lastSeenAt),
+    index('media_downloads_server_first_seen_idx').on(t.serverId, t.firstSeenAt),
+    index('media_downloads_media_id_idx').on(t.mediaId),
   ]
 );
 
@@ -1548,6 +1607,20 @@ export const libraryItems = pgTable(
 
     // Composite index for library-scoped queries
     index('idx_library_items_server_library').on(table.serverId, table.libraryId),
+
+    // Hierarchy indexes for episode and track lookups
+    index('idx_library_items_grandparent')
+      .on(table.serverId, table.grandparentRatingKey)
+      .where(sql`${table.grandparentRatingKey} IS NOT NULL`),
+    index('idx_library_items_parent')
+      .on(table.serverId, table.parentRatingKey)
+      .where(sql`${table.parentRatingKey} IS NOT NULL`),
+    index('idx_library_items_episode_lookup')
+      .on(table.serverId, table.grandparentRatingKey, table.parentIndex, table.itemIndex)
+      .where(sql`${table.mediaType} = 'episode'`),
+    index('idx_library_items_track_lookup')
+      .on(table.serverId, table.grandparentRatingKey, table.parentRatingKey, table.itemIndex)
+      .where(sql`${table.mediaType} = 'track'`),
 
     // Unique constraint to prevent duplicates (one rating_key per server)
     uniqueIndex('library_items_server_rating_key_unique').on(table.serverId, table.ratingKey),

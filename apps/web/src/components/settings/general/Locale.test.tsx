@@ -14,16 +14,29 @@ vi.mock('@tracearr/translations', () => ({
   changeLanguage: vi.fn(),
 }));
 
-vi.mock('@/lib/timeFormat', () => ({
+vi.mock('@/lib/dateFormat', () => ({
   getTimeFormat: () => '12h',
   setTimeFormat: vi.fn(),
+  getDateRegion: vi.fn(() => 'auto'),
+  setDateRegion: vi.fn(),
+  getWeekStartPref: () => 'auto',
+  setWeekStartPref: vi.fn(),
+  getFormatLocale: () => 'en-US',
+  sampleDate: () => '5/17/26 · May 17, 2026',
+  dateFormatChoices: () => [
+    { region: 'DE', sample: '17/05/2026 · 17 May 2026' },
+    { region: 'GB', sample: '5/17/26 · May 17, 2026' },
+  ],
+  localeFirstDay: () => 0,
+  weekdayName: (day: number) =>
+    ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][day],
 }));
 
 vi.mock('@/hooks/queries', () => ({ useSettings: vi.fn() }));
 vi.mock('@/hooks/useDebouncedSave', () => ({ useDebouncedSave: vi.fn(), TEXT_INPUT_DELAY: 1000 }));
 
 import { changeLanguage } from '@tracearr/translations';
-import { setTimeFormat } from '@/lib/timeFormat';
+import { getDateRegion, setTimeFormat, setDateRegion, setWeekStartPref } from '@/lib/dateFormat';
 import { useSettings } from '@/hooks/queries';
 import { useDebouncedSave } from '@/hooks/useDebouncedSave';
 
@@ -53,11 +66,13 @@ describe('Locale', () => {
     vi.mocked(useDebouncedSave).mockReturnValue(saveResult('metric'));
   });
 
-  it('shows the three locale controls', () => {
+  it('shows the locale controls', () => {
     render(<Locale />);
 
     expect(screen.getByRole('combobox', { name: 'general.language' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'general.timeFormat' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'general.dateFormat' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'general.weekStart' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'general.unitSystem' })).toBeInTheDocument();
   });
 
@@ -77,6 +92,36 @@ describe('Locale', () => {
     await userEvent.click(screen.getByRole('option', { name: 'general.timeFormat24h' }));
 
     expect(setTimeFormat).toHaveBeenCalledWith('24h');
+  });
+
+  it('stores the chosen date format', async () => {
+    render(<Locale />);
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'general.dateFormat' }));
+    await userEvent.click(screen.getByRole('option', { name: '17/05/2026 · 17 May 2026' }));
+
+    expect(setDateRegion).toHaveBeenCalledWith('DE');
+  });
+
+  it('stores automatic over a saved country that prints the same format', async () => {
+    vi.mocked(getDateRegion).mockReturnValueOnce('GB');
+    render(<Locale />);
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'general.dateFormat' }));
+    await userEvent.click(
+      screen.getByRole('option', { name: 'general.automatic (5/17/26 · May 17, 2026)' })
+    );
+
+    expect(setDateRegion).toHaveBeenCalledWith('auto');
+  });
+
+  it('stores the chosen first day of the week', async () => {
+    render(<Locale />);
+
+    await userEvent.click(screen.getByRole('combobox', { name: 'general.weekStart' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Monday' }));
+
+    expect(setWeekStartPref).toHaveBeenCalledWith(1);
   });
 
   it('saves the chosen unit system', async () => {

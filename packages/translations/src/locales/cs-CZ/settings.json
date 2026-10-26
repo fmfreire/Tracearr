@@ -59,6 +59,11 @@
     "timeFormatDescription": "Zvolte, jak se zobrazují časy.",
     "timeFormat12h": "12-hodinový (1:30 PM)",
     "timeFormat24h": "24hodinový (13:30)",
+    "dateFormat": "",
+    "dateFormatDescription": "",
+    "weekStart": "",
+    "weekStartDescription": "",
+    "automatic": "",
     "theme": "Téma",
     "accentColor": "Barva zvýraznění",
     "default": "(výchozí)",
@@ -253,6 +258,29 @@
       "installed": "",
       "upToDate": "",
       "updateAvailable": ""
+    },
+    "ownerAccount": {
+      "label": "",
+      "link": "",
+      "unlink": "",
+      "dialog": {
+        "title": "",
+        "description": "",
+        "admin": "",
+        "lastActive": "",
+        "neverActive": "",
+        "otherAccounts": "",
+        "signsIn": "",
+        "warningTitle": "",
+        "warning": "",
+        "warning_jellyfin": "",
+        "confirmLabel": "",
+        "submit": ""
+      },
+      "confirmUnlink": {
+        "title": "",
+        "body": ""
+      }
     }
   },
   "mobile": {
@@ -532,6 +560,51 @@
   "ipWarning": {
     "message": "Zdá se, že všichni uživatelé používají stejnou IP adresu nebo místní síťové IP adresy. To může ovlivnit logiku založenou na pravidlech pro umístění nebo IP adresy.",
     "acknowledge": "Rozumím"
+  },
+  "storageWarning": {
+    "bannerDatabase": "",
+    "bannerData": "",
+    "showHow": "",
+    "hide": "",
+    "titleDatabase": "",
+    "titleData": "",
+    "fields": {
+      "postgres": "",
+      "redis": "",
+      "appData": ""
+    },
+    "isSetTo": "",
+    "overheadDatabase": "",
+    "overheadData": "",
+    "pool": {
+      "alreadyDatabase": "",
+      "alreadyData": "",
+      "alreadyPools": "",
+      "openEdit": "",
+      "change": "",
+      "copyPath": "",
+      "apply": "",
+      "clears": ""
+    },
+    "split": {
+      "arrayDatabase": "",
+      "arrayData": "",
+      "poolsDatabase": "",
+      "poolsData": "",
+      "stop": "",
+      "shares": "",
+      "move": "",
+      "start": ""
+    },
+    "unknown": {
+      "isSetToDatabase": "",
+      "isSetToData": "",
+      "otherFuseDatabase": "",
+      "otherFuseData": "",
+      "fixDatabase": "",
+      "fixData": ""
+    },
+    "faq": ""
   },
   "backup": {
     "title": "Záloha",

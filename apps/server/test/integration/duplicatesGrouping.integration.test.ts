@@ -23,6 +23,8 @@ import {
   createTestLibraryItemVersion,
 } from '@tracearr/test-utils/factories';
 import { createMockRedis } from '@tracearr/test-utils/mocks';
+import { db } from '../../src/db/client.js';
+import { media } from '../../src/db/schema.js';
 import { libraryDuplicatesRoute } from '../../src/routes/library/duplicates.js';
 import { permissionGuard } from '../../src/lib/scope.js';
 

@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { format } from 'date-fns';
 import { verbKeysFor, type MediaRequestEntry } from '@tracearr/shared';
 import { ApiError } from '@/lib/api';
 import {
@@ -30,15 +29,15 @@ import { AlbumsPanel } from '@/components/media-browse/AlbumsPanel';
 import { AlbumSheet } from '@/components/media-browse/AlbumSheet';
 import { PlatformPanel } from '@/components/media-browse/PlatformPanel';
 import { MediaRequestsPanel } from '@/components/requests/MediaRequestsPanel';
+import { MediaDownloadsPanel } from '@/components/media/MediaDownloadsPanel';
 import { InlineErrorState } from '@/components/library/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { formatDuration } from '@/lib/formatters';
-import { getTimeFormatString } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
+import { formatDate, formatDuration } from '@/lib/dateFormat';
 import { getAvatarUrl } from '@/components/users/utils';
 
 const HISTORY_ROW_HEIGHT = 56;
@@ -236,10 +235,13 @@ function HistoryPanel({
                   >
                     <div role="cell" className={HISTORY_CELL_CLASS}>
                       <div className="text-sm">
-                        {format(new Date(row.started_at), 'MMM d, yyyy')}
+                        {formatDate(new Date(row.started_at), { dateStyle: 'medium' })}
                       </div>
                       <div className="text-muted-foreground text-xs">
-                        {format(new Date(row.started_at), getTimeFormatString())}
+                        {formatDate(new Date(row.started_at), {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
                       </div>
                     </div>
                     {showUser && (
@@ -318,7 +320,6 @@ export function MediaDetail() {
   // A history row's id is its chain id (the chain's first session id), so the
   // existing single-session endpoint resolves it - same as History deep-links.
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const { data: selectedSession } = useSession(selectedSessionId ?? '');
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -357,6 +358,12 @@ export function MediaDetail() {
   const childrenQuery = useMediaChildren(id, selectedServerIds, isArtist);
   const platformsQuery = useMediaPlatforms(id, selectedServerIds);
   const historyQuery = useMediaHistory(id, selectedServerIds);
+  const { data: selectedSession } = useSession(
+    selectedSessionId ?? '',
+    historyQuery.data?.pages
+      .flatMap((page) => page.data)
+      .find((row) => row.id === selectedSessionId)?.started_at
+  );
   const requestsQuery = useMediaRequests(id, selectedServerIds);
 
   // requestedAt is a fixed-width UTC ISO string from the API, so comparing the
@@ -432,6 +439,8 @@ export function MediaDetail() {
         onRetry={() => void detailQuery.refetch()}
         serverById={serverById}
       />
+
+      <MediaDownloadsPanel rows={detailQuery.data?.downloads} />
 
       {mediaType !== 'episode' && (
         <MediaRequestsPanel
