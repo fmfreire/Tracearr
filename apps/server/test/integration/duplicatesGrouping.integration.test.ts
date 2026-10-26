@@ -302,7 +302,7 @@ describe('GET /library/duplicates (real SQL)', () => {
     expect(item.episodeNumber).toBe(2);
   });
 
-  it('never fuzzy-matches episodes across shows but groups copies within one show', async () => {
+  it('never fuzzy-matches same-titled episodes of different shows', async () => {
     const server = await createTestServer();
     const pilot = (show: string, fileSize: number) =>
       createTestLibraryItem({
@@ -315,16 +315,9 @@ describe('GET /library/duplicates (real SQL)', () => {
         itemIndex: 1,
         fileSize,
       });
-    for (const [show, fileSize] of [
-      ['Powers', 101],
-      ['Superstore', 102],
-      ['Ballers', 103],
-      ['Krypton', 104],
-      ['Insatiable', 105],
-    ] as const) {
-      await pilot(show, fileSize);
-    }
-    await pilot('Powers', 99);
+    await pilot('Powers', 101);
+    await pilot('Powerless', 99);
+    await pilot('Powers', 98);
 
     const app = await buildApp(ownerUser());
     const body = await requestDuplicates(app, [server.id], '&minConfidence=60', true);
@@ -334,37 +327,88 @@ describe('GET /library/duplicates (real SQL)', () => {
     expect(body.duplicates[0]?.items).toHaveLength(2);
   });
 
-  it('never fuzzy-matches tracks across artists or albums', async () => {
+  it('groups tagged tracks by MusicBrainz id, never by a shared title', async () => {
+    const serverA = await createTestServer();
+    const serverB = await createTestServer();
+    const mbid = randomUUID();
+    const [row] = await db
+      .insert(media)
+      .values({ mediaType: 'track', matchKey: `track:mbid:${mbid}`, title: 'Girls & Boys' })
+      .returning({ id: media.id });
+    for (const [serverId, fileSize] of [
+      [serverA.id, 38_000_000],
+      [serverB.id, 9_000_000],
+    ] as const) {
+      await createTestLibraryItem({
+        serverId,
+        title: 'Girls & Boys',
+        mediaType: 'track',
+        year: null,
+        grandparentTitle: 'Blur',
+        parentTitle: 'Parklife',
+        itemIndex: 1,
+        mediaId: row!.id,
+        fileSize,
+      });
+    }
+    // The same song on a compilation, untagged: not a copy of the album track
+    await createTestLibraryItem({
+      serverId: serverA.id,
+      title: 'Girls & Boys',
+      mediaType: 'track',
+      year: null,
+      grandparentTitle: 'Blur',
+      parentTitle: 'Blur: The Best Of',
+      itemIndex: 1,
+      fileSize: 8_000_000,
+    });
+
+    const app = await buildApp(ownerUser());
+    const body = await requestDuplicates(app, [serverA.id, serverB.id], '&minConfidence=60', true);
+
+    expect(body.summary.totalGroups).toBe(1);
+    const group = body.duplicates[0]!;
+    expect(group.matchType).toBe('mbid');
+    expect(group.confidence).toBe(100);
+    expect(group.items.map((item) => item.parentTitle)).toEqual(['Parklife', 'Parklife']);
+    expect(body.summary.byMatchType.mbid).toBe(1);
+  });
+
+  it('fuzzy-matches untagged tracks within one artist, album edition and track number', async () => {
     const server = await createTestServer();
-    const track = (
-      artist: string,
-      album: string,
-      fileSize: number,
-      title = 'Intro'
-    ) =>
+    const track = (artist: string, album: string, itemIndex: number, fileSize: number) =>
       createTestLibraryItem({
         serverId: server.id,
-        title,
+        title: 'Intro',
         mediaType: 'track',
         year: null,
         grandparentTitle: artist,
         parentTitle: album,
+        itemIndex,
         fileSize,
       });
-
-    await track('The Notorious B.I.G.', 'Ready to Die', 100);
-    await track('The Notorious B.I.G.', 'Ready to Die', 90);
-    await track('The Notorious B.I.G.', 'Born Again', 80);
-    await track('Pitbull', 'El Mariel', 70);
-    await track('50 Cent', 'Curtis', 60);
+    await track('Blur', 'Parklife', 1, 101);
+    await track('Blur', 'Parklife (Deluxe Edition)', 1, 99);
+    await track('Blur', 'Leisure', 1, 98);
+    await track('Blur', 'Parklife', 2, 97);
+    await track('Oasis', 'Parklife', 1, 96);
+    await track('Oasis', 'Be Here Now', 1, 50);
+    await track('Oasis', 'Be Here Now', 1, 40);
 
     const app = await buildApp(ownerUser());
     const body = await requestDuplicates(app, [server.id], '&minConfidence=60', true);
 
-    expect(body.summary.totalGroups).toBe(1);
-    expect(body.duplicates[0]?.matchType).toBe('fuzzy');
-    expect(body.duplicates[0]?.items).toHaveLength(2);
-    expect(body.duplicates[0]?.items.map((item) => item.title)).toEqual(['Intro', 'Intro']);
+    // Two pairs titled Intro by different artists stay two groups
+    expect(body.summary.totalGroups).toBe(2);
+    const albums = body.duplicates.map((group) =>
+      group.items.map((item) => `${item.grandparentTitle}/${item.parentTitle}`).sort()
+    );
+    expect(albums).toEqual(
+      expect.arrayContaining([
+        ['Blur/Parklife', 'Blur/Parklife (Deluxe Edition)'],
+        ['Oasis/Be Here Now', 'Oasis/Be Here Now'],
+      ])
+    );
   });
 
   it('orders by reclaimable bytes and sums the summary over all groups', async () => {
