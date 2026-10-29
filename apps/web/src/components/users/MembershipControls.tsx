@@ -40,13 +40,13 @@ export function MembershipControls({
 }: {
   serverUserId: string;
   identityName: string;
-  identityType: MembershipType;
+  identityType?: MembershipType;
   identityExpirationDate: string | null;
   identityPolicy: MembershipEnforcementPolicy | null;
 }) {
   const { t } = useTranslation('pages');
   const update = useUpdateUserIdentity();
-  const [type, setType] = useState<MembershipType>(identityType);
+  const [type, setType] = useState<MembershipType>(identityType ?? 'normal');
   const [expirationDate, setExpirationDate] = useState(identityExpirationDate ?? '');
   const [policy, setPolicy] = useState<MembershipEnforcementPolicy>(
     identityPolicy ?? 'kill_first_stream_daily'

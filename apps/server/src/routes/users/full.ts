@@ -18,6 +18,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { userIdParamSchema, identityScopeQuerySchema } from '@tracearr/shared';
+import { membershipStatusFor } from '../../services/membership.js';
 import { db } from '../../db/client.js';
 import {
   serverUsers,
@@ -104,6 +105,9 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
           loginCount: users.loginCount,
           identityAggregateTrustScore: users.aggregateTrustScore,
           identityTotalViolations: users.totalViolations,
+          identityMembershipType: users.membershipType,
+          identityMembershipExpirationDate: users.membershipExpirationDate,
+          identityMembershipEnforcementPolicy: users.membershipEnforcementPolicy,
         })
         .from(serverUsers)
         .innerJoin(servers, eq(serverUsers.serverId, servers.id))
@@ -245,8 +249,14 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
         identityAggregateTrustScore,
         identityTotalViolations,
         identityContactEmail,
+        identityMembershipType,
+        identityMembershipExpirationDate,
+        identityMembershipEnforcementPolicy,
         ...serverUserFields
       } = serverUser;
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const effectiveMembershipType = identityMembershipType ?? 'normal';
 
       return {
         user: {
@@ -256,6 +266,14 @@ export const fullRoutes: FastifyPluginAsync = async (app) => {
         },
         identity: {
           userId: serverUser.userId,
+          membershipStatus: membershipStatusFor(
+            effectiveMembershipType,
+            identityMembershipExpirationDate,
+            todayStr
+          ),
+          membershipType: effectiveMembershipType,
+          membershipExpirationDate: identityMembershipExpirationDate,
+          membershipEnforcementPolicy: identityMembershipEnforcementPolicy,
           aggregateTrustScore: identityAggregateTrustScore,
           totalViolations: identityTotalViolations,
           contactEmail: identityContactEmail,
