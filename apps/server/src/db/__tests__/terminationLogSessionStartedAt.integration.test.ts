@@ -13,8 +13,10 @@ import { sessions, terminationLogs } from '../schema.js';
 const MIGRATIONS = `${import.meta.dirname}/../migrations`;
 
 function statementsOf(): string[] {
-  const file = readdirSync(MIGRATIONS).find((name) => /^0119_.*\.sql$/.test(name));
-  if (!file) throw new Error('migration 0119 not found');
+  const file = readdirSync(MIGRATIONS).find(
+    (name) => name === '0119_termination_log_session_started_at.sql'
+  );
+  if (!file) throw new Error('termination log session_started_at migration not found');
   return readFileSync(`${MIGRATIONS}/${file}`, 'utf8')
     .split('--> statement-breakpoint')
     .map((s) => s.trim())
