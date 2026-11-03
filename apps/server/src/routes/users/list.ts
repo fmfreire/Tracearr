@@ -62,6 +62,7 @@ import { disconnectUserSockets } from '../../websocket/index.js';
 import { parseDateString } from '../../utils/parsing.js';
 import { representativeAccountOrderSql } from '../../utils/representativeAccount.js';
 import { VIOLATION_ALIAS_SQL } from '../../services/automations/aliasFilter.js';
+import { membershipStatusFor } from '../../services/membership.js';
 import { identityAccountsWhere, userHistoryWindow, userPlayTotals } from './queries/index.js';
 
 /** What a trust-score notification says moved the score when a person did it by hand. */
@@ -702,7 +703,7 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /**
-   * PATCH /:id/identity - Update user identity (display name and contact email)
+   * PATCH /:id/identity - Update identity profile and shared membership settings
    * Owner-only. Updates the users table (identity), not server_users.
    */
   app.patch('/:id/identity', { preHandler: [app.requireOwner] }, async (request, reply) => {
@@ -737,12 +738,22 @@ export const listRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Update the identity record (users table)
-    const updated = await updateUser(serverUser.userId, {
-      name: body.data.name,
-      contactEmail: body.data.contactEmail,
-    });
+    const updated = await updateUser(serverUser.userId, body.data);
+    const today = new Date().toISOString().slice(0, 10);
 
-    return { success: true, name: updated.name, contactEmail: updated.contactEmail };
+    return {
+      success: true,
+      name: updated.name,
+      contactEmail: updated.contactEmail,
+      membershipStatus: membershipStatusFor(
+        updated.membershipType,
+        updated.membershipExpirationDate,
+        today
+      ),
+      membershipType: updated.membershipType,
+      membershipExpirationDate: updated.membershipExpirationDate,
+      membershipEnforcementPolicy: updated.membershipEnforcementPolicy,
+    };
   });
 
   /**

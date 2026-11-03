@@ -290,8 +290,16 @@ describe('UserDetail', () => {
   it('wraps the user detail tabs so Access stays reachable on narrow screens', () => {
     renderDetail();
 
-    expect(screen.getByRole('tablist')).toHaveClass('w-full', 'flex-wrap', 'h-auto');
+    expect(screen.getByRole('tablist')).toHaveClass(
+      'w-full',
+      'grid',
+      'grid-cols-3',
+      'h-auto',
+      'group-data-[orientation=horizontal]/tabs:h-auto'
+    );
     expect(screen.getByRole('tab', { name: /pages:userDetail.tabs.access/ })).toHaveClass(
+      'h-9',
+      'w-full',
       'flex-none'
     );
   });

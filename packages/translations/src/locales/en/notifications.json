@@ -129,7 +129,7 @@
         "title": "Pair Token Generated",
         "message": "Scan the QR code with your mobile device to pair"
       },
-      "identityUpdated": "Profile updated",
+      "identityUpdated": "Changes saved",
       "trustScoresReset": {
         "title": "Trust Scores Reset",
         "message_one": "{{count}} user reset to 100",
