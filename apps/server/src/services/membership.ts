@@ -7,6 +7,7 @@ import type {
 } from '@tracearr/shared';
 import { db, type Executor } from '../db/client.js';
 import { sessions, users } from '../db/schema.js';
+import { sessionRowById } from '../db/sessions/row.js';
 
 export const DEFAULT_MEMBERSHIP_POLICY: MembershipEnforcementPolicy = 'kill_first_stream_daily';
 
@@ -86,7 +87,7 @@ export async function membershipEnforcementDue(
         decision: sessions.membershipEnforcementDecision,
       })
       .from(sessions)
-      .where(eq(sessions.id, sessionId))
+      .where(sessionRowById({ id: sessionId, startedAt }))
       .for('update')
       .limit(1);
     if (!session) return false;
@@ -147,7 +148,7 @@ export async function membershipEnforcementDue(
     await executor
       .update(sessions)
       .set({ membershipEnforcementDecision: shouldKill })
-      .where(eq(sessions.id, sessionId));
+      .where(sessionRowById({ id: sessionId, startedAt }));
     return shouldKill;
   };
 

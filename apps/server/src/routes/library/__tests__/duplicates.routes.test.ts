@@ -252,7 +252,6 @@ describe('GET /library/duplicates', () => {
 
     const query = vi.mocked(db.execute).mock.calls[0]?.[0] as SQL;
     const { sql: queryText } = new PgDialect().sqlToQuery(query);
-    expect(queryText).toContain("a.grandparent_title || ' ' || a.title");
     expect(queryText).toContain('similarity(a.grandparent_title, b.grandparent_title) >= 0.6');
   });
 
@@ -263,8 +262,9 @@ describe('GET /library/duplicates', () => {
 
     const query = vi.mocked(db.execute).mock.calls[0]?.[0] as SQL;
     const { sql: queryText } = new PgDialect().sqlToQuery(query);
-    expect(queryText).toContain("a.grandparent_title || ' / ' || a.parent_title || ' / ' || a.title");
-    expect(queryText).toContain('similarity(a.parent_title, b.parent_title) >= 0.6');
+    expect(queryText).toContain('a.artist_key = b.artist_key');
+    expect(queryText).toContain('word_similarity(a.parent_title, b.parent_title)');
+    expect(queryText).toContain('word_similarity(b.parent_title, a.parent_title)');
   });
 
   it('refetches the summary when the requested page is past the end', async () => {

@@ -47,7 +47,7 @@ function bindingsFor(envelope: TemplateEnvelope): Record<string, unknown> {
   return bound;
 }
 
-/** Slug, group and kind per the built-ins table in the phase-5 design. */
+/** Slug, group and kind for every bundled template, in catalog order. */
 const TABLE: Array<[string, string, string]> = [
   ['stream-started', 'notifications', 'notification'],
   ['stream-ended', 'notifications', 'notification'],
@@ -55,6 +55,7 @@ const TABLE: Array<[string, string, string]> = [
   ['paused-too-long', 'notifications', 'notification'],
   ['media-added', 'notifications', 'notification'],
   ['media-upgraded', 'notifications', 'notification'],
+  ['membership-enforcement', 'policies', 'policy'],
   ['new-device', 'notifications', 'notification'],
   ['trust-score-changed', 'notifications', 'notification'],
   ['newsletter-failed', 'notifications', 'notification'],
@@ -75,7 +76,7 @@ const TABLE: Array<[string, string, string]> = [
 ];
 
 describe('builtin template envelopes', () => {
-  it('bundles the twenty-three templates the design names, in its order', () => {
+  it('bundles all built-in templates in catalog order', () => {
     expect(BUILTIN_ENVELOPES.map((envelope) => envelope.slug)).toEqual(TABLE.map(([slug]) => slug));
   });
 

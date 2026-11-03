@@ -77,6 +77,7 @@ const ALLOWLIST: Record<string, string> = {
   'services/library/importedPlayIdentity.ts': IMPORTS,
   'services/library/mediaDetailService.ts':
     'media detail plays and watch time per server, user, device',
+  'services/membership.ts': 'membership enforcement locks and memoizes the decision for a session',
   'services/mergeService.ts': ADMIN,
   'services/playbackReporting.ts': IMPORTS,
   'services/stats/peopleStats.ts': STATS,
