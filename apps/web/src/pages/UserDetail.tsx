@@ -211,9 +211,9 @@ export function UserDetail() {
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="gap-6">
         <div className="border-b">
-          <TabsList variant="line" className="-mb-px">
+          <TabsList variant="line" className="-mb-px h-auto w-full flex-wrap justify-start">
             {tabs.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>
+              <TabsTrigger key={tab.value} value={tab.value} className="flex-none">
                 {tab.label}
                 {tab.count !== undefined && <TabCount count={tab.count} />}
               </TabsTrigger>
