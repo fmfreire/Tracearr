@@ -1,0 +1,10 @@
+{
+  "version": "3.1.4",
+  "date": "2026-11-03",
+  "changes": [
+    {
+      "type": "fix",
+      "text": "user detail tabs wrap on narrow screens so the Access tab remains reachable"
+    }
+  ]
+}
