@@ -91,10 +91,11 @@ export function MembershipControls({
             {t(`userDetail.membership.${status}`)}
           </p>
         </div>
-        <label className="space-y-1 text-sm">
+        <label className="max-w-56 space-y-1 text-sm">
           <span className="text-muted-foreground">{t('userDetail.membership.expirationDate')}</span>
           <Input
             type="date"
+            className="max-w-56"
             value={expirationDate}
             onChange={(event) => setExpirationDate(event.target.value)}
             disabled={type !== 'normal'}
@@ -139,7 +140,7 @@ export function MembershipControls({
         }
         disabled={update.isPending}
       >
-        {t('userDetail.membership.saveIdentity')}
+        {t('userDetail.membership.saveMembership')}
       </Button>
       {update.error && <FieldError>{update.error.message}</FieldError>}
     </section>

@@ -287,6 +287,23 @@ describe('UserDetail', () => {
     expect(tabs[tabs.length - 1]).toContain('pages:userDetail.tabs.access');
   });
 
+  it('wraps the user detail tabs so Access stays reachable on narrow screens', () => {
+    renderDetail();
+
+    expect(screen.getByRole('tablist')).toHaveClass(
+      'w-full',
+      'grid',
+      'grid-cols-3',
+      'h-auto',
+      'group-data-[orientation=horizontal]/tabs:h-auto'
+    );
+    expect(screen.getByRole('tab', { name: /pages:userDetail.tabs.access/ })).toHaveClass(
+      'h-9',
+      'w-full',
+      'flex-none'
+    );
+  });
+
   it('has no downloads tab when the person has none', () => {
     vi.mocked(useUserDownloads).mockReturnValue({
       data: { data: [], total: 0 },

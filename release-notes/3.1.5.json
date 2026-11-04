@@ -1,0 +1,18 @@
+{
+  "version": "3.1.5",
+  "date": "2026-11-03",
+  "changes": [
+    {
+      "type": "fix",
+      "text": "user detail tabs no longer overlap page content on mobile"
+    },
+    {
+      "type": "fix",
+      "text": "membership changes are saved across linked server accounts"
+    },
+    {
+      "type": "improved",
+      "text": "membership controls use clearer save wording and a compact paid-through date field"
+    }
+  ]
+}

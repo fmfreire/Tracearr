@@ -211,9 +211,16 @@ export function UserDetail() {
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="gap-6">
         <div className="border-b">
-          <TabsList variant="line" className="-mb-px">
+          <TabsList
+            variant="line"
+            className="grid h-auto w-full grid-cols-3 justify-start group-data-[orientation=horizontal]/tabs:h-auto sm:-mb-px sm:flex sm:w-fit sm:flex-nowrap"
+          >
             {tabs.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                className="h-9 w-full flex-none sm:w-auto"
+              >
                 {tab.label}
                 {tab.count !== undefined && <TabCount count={tab.count} />}
               </TabsTrigger>

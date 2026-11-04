@@ -45,7 +45,7 @@ vi.mock('../../../services/userService.js', async (importActual) => {
 import { db } from '../../../db/client.js';
 import { refreshUserSessionSnapshots, revokeSessionsForUsers } from '../../../lib/revoke.js';
 import { disconnectUserSockets } from '../../../websocket/index.js';
-import { recomputeIdentityAggregates } from '../../../services/userService.js';
+import { recomputeIdentityAggregates, updateUser } from '../../../services/userService.js';
 import { getSetting } from '../../../services/settings.js';
 import {
   listRoutes,
@@ -606,6 +606,54 @@ describe('GET /users/:id', () => {
     expect(renderCall(statsChain).text).toBe(
       `sessions.server_user_id = ANY(ARRAY['${id}'::uuid]) AND sessions.started_at >= $1 AND sessions.started_at <= $2`
     );
+  });
+});
+
+describe('PATCH /users/:id/identity membership', () => {
+  let app: FastifyInstance;
+  const serverUser = {
+    id: randomUUID(),
+    userId: randomUUID(),
+    serverId: randomUUID(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('persists membership fields to the identity and returns the saved membership', async () => {
+    app = await buildTestApp(owner());
+    const membership = {
+      membershipType: 'normal' as const,
+      membershipExpirationDate: '2099-12-31',
+      membershipEnforcementPolicy: 'kill_every_2_plays' as const,
+    };
+    mockSelect.mockReturnValueOnce(thenableChain([serverUser]));
+    vi.mocked(updateUser).mockResolvedValue({
+      name: 'Alice',
+      contactEmail: null,
+      membershipType: membership.membershipType,
+      membershipExpirationDate: membership.membershipExpirationDate,
+      membershipEnforcementPolicy: membership.membershipEnforcementPolicy,
+    } as Awaited<ReturnType<typeof updateUser>>);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/users/${serverUser.id}/identity`,
+      payload: membership,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(updateUser).toHaveBeenCalledExactlyOnceWith(serverUser.userId, membership);
+    expect(response.json()).toMatchObject({
+      success: true,
+      ...membership,
+      membershipStatus: 'paid',
+    });
   });
 });
 
