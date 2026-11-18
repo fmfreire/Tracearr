@@ -38,7 +38,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ── Path setup ────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
+function Write-Utf8NoBom([string]$filePath, [string]$text) {
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($filePath, $text, $utf8NoBom)
+}
 $ghCmdPaths = @(
   "C:\Program Files\GitHub CLI",
   "C:\Users\$env:USERNAME\AppData\Local\Programs\GitHubCLI\bin"
@@ -170,7 +174,7 @@ if (-not (Test-Path $releaseNotesFile)) {
 }
 "@
   }
-  Set-Content -Path $releaseNotesFile -Value $template -Encoding UTF8
+  Write-Utf8NoBom $releaseNotesFile $template
   $createdReleaseNotes = $true
 }
 
@@ -218,7 +222,7 @@ if (-not $SkipPR) {
   if ($needsChartBump) {
     $chartContent = $chartContent -replace '(?m)^version:\s*\S+', "version: $nextVersion"
     $chartContent = $chartContent -replace '(?m)^appVersion:\s*"?\S+"?', "appVersion: `"$nextVersion`""
-    Set-Content $chartFile $chartContent -NoNewline
+    Write-Utf8NoBom $chartFile $chartContent
   }
 
   $branch = "chore/bump-release-$nextVersion"
