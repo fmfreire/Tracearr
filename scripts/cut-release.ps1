@@ -152,7 +152,7 @@ if (-not (Test-Path $releaseNotesFile)) {
       changes = @(
         [PSCustomObject]@{
           type = "new"
-          text = "Synchronized with upstream releases."
+          text = "Synchronized with upstream releases"
           refs = @()
         }
       )
@@ -164,7 +164,7 @@ if (-not (Test-Path $releaseNotesFile)) {
       changes = @(
         [PSCustomObject]@{
           type = "fix"
-          text = "Maintenance release and upstream synchronization."
+          text = "Maintenance release and upstream synchronization"
           refs = @()
         }
       )
@@ -264,8 +264,8 @@ $env:GH_TOKEN = ""
 $pushOutput = git push origin $tag --no-verify 2>&1
 $env:GH_TOKEN = $savedToken
 
-# A new tag line in output means success even if exit code is 1 (Husky noise)
-if ($pushOutput -match "\* \[new tag\]") {
+# A new tag line or tag reference in output means success even if exit code is 1 (Husky noise)
+if ($pushOutput -match "\* \[new tag\]" -or $pushOutput -match "-> $tag" -or $pushOutput -match "\[forced update\]") {
   Write-Host "   ✅ Tag $tag pushed successfully" -ForegroundColor Green
 } elseif ($LASTEXITCODE -ne 0) {
   Write-Error "Tag push failed:`n$pushOutput"
