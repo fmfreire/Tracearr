@@ -204,7 +204,7 @@ if ($remoteTag) {
 $chartFile = "$repoRoot\docker\helm\tracearr\Chart.yaml"
 $chartContent = Get-Content $chartFile -Raw
 
-$currentChartVersion = if ($chartContent -match 'version:\s*(\S+)') { $Matches[1] } else { "unknown" }
+$currentChartVersion = if ($chartContent -match '(?m)^version:\s*(\S+)') { $Matches[1] } else { "unknown" }
 Write-Host "`n📄 Chart.yaml current version: $currentChartVersion"
 
 $needsChartBump = ($currentChartVersion -ne $nextVersion)
