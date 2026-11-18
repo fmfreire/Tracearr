@@ -135,6 +135,7 @@ vi.mock('../sessionMapper.js', () => ({
 import { servers, serverUsers, sessions as sessionsTable } from '../../../db/schema.js';
 import { initializePoller, stopPoller, triggerPoll } from '../processor.js';
 import { buildPendingActiveSession } from '../sessionLifecycle.js';
+import { fakePlexClient } from '../../../test/mediaServerFakes.js';
 
 function createMockProcessedSession(overrides: Partial<ProcessedSession> = {}): ProcessedSession {
   return {
@@ -302,7 +303,8 @@ function createCacheService(cachedActive: ActiveSession[]) {
     removeActiveSession: vi.fn().mockResolvedValue(undefined),
     removeUserSession: vi.fn().mockResolvedValue(undefined),
     hasTerminationCooldown: vi.fn().mockResolvedValue(false),
-    hasTerminationCooldownComposite: vi.fn().mockResolvedValue(false),
+    getTerminationCooldownsComposite: vi.fn().mockResolvedValue(new Map()),
+    clearTerminationCooldownsComposite: vi.fn(),
     addSessionWriteRetry: vi.fn().mockResolvedValue(undefined),
     invalidateDashboardStatsCache: vi.fn().mockResolvedValue(undefined),
   };
@@ -313,9 +315,11 @@ describe('poller in-lock cross-user sessionKey guards', () => {
     vi.clearAllMocks();
     stopPoller();
     mockGetActiveAutomations.mockResolvedValue([]);
-    mockCreateMediaServerClient.mockReturnValue({
-      getSessions: vi.fn().mockResolvedValue([createMockProcessedSession()]),
-    });
+    mockCreateMediaServerClient.mockReturnValue(
+      fakePlexClient({
+        getSessions: vi.fn().mockResolvedValue([createMockProcessedSession()]),
+      })
+    );
     mockCreateSessionWithRulesAtomic.mockResolvedValue(createResultOk);
     mockBuildActiveSession.mockReturnValue({ id: 'new-id' });
     // In-lock recheck returns the stale row belonging to another user.

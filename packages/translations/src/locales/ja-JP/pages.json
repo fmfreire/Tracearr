@@ -544,7 +544,7 @@
       "quietest": "",
       "bingeHighlights": "一気見ハイライト",
       "bingeHighlightsDesc": "",
-      "bingeSessions": "一気見セッション",
+      "consecutivePlays": "",
       "noData": "視聴データはまだありません",
       "noDataDesc": "コンテンツが再生されると、視聴分析がここに表示されます。視聴が行われた後にもう一度確認してください。",
       "failedToLoad": "視聴分析の読み込みに失敗しました",
@@ -555,7 +555,8 @@
           "show": "",
           "servers": "",
           "consecutive": "",
-          "bingeScore": "",
+          "people": "",
+          "episodesPerViewer": "",
           "maxPerDay": ""
         },
         "empty": {
@@ -1256,6 +1257,7 @@
         "sessionPaused": "",
         "sessionHeldFor": "",
         "sessionHeldForTotal": "",
+        "sessionWatched": "",
         "accountInactiveFor": "",
         "accountNewDevice": "",
         "accountTrustChanged": "",
@@ -2023,6 +2025,10 @@
           "description": "",
           "synonyms": ""
         },
+        "sessionWatched": {
+          "description": "",
+          "synonyms": ""
+        },
         "accountInactiveFor": {
           "label": "",
           "description": "",
@@ -2140,6 +2146,7 @@
         "reset": "",
         "tls": "",
         "http": "",
+        "relay": "",
         "unknown": ""
       },
       "connectionsReachable": "{{reachable}} / {{total}} コネクションに到達可能",
@@ -2800,6 +2807,7 @@
         "libraryAll": "",
         "yearFromLabel": "",
         "yearToLabel": "",
+        "addedLabel": "",
         "sizeGbMinLabel": "",
         "sizeGbMaxLabel": "",
         "sizeChipAtLeast": "",

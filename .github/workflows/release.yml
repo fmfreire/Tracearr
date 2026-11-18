@@ -30,12 +30,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: 26
           cache: 'pnpm'
 
       - name: Cache Turborepo
@@ -74,12 +74,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: 26
           cache: 'pnpm'
 
       - name: Cache Turborepo
@@ -139,7 +139,7 @@ jobs:
           --health-retries 10
 
       redis:
-        image: redis:8-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
+        image: redis:8-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
         ports:
           - 6380:6379
         options: >-
@@ -153,12 +153,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: 26
           cache: 'pnpm'
 
       - name: Cache Turborepo
@@ -189,12 +189,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: 26
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -218,11 +218,38 @@ jobs:
             release-notes-out/release-notes.json
           if-no-files-found: error
 
+  # The chart's default image tag falls back to appVersion, and installs from a git
+  # tag read Chart.yaml at that tag, so a stable tag must already carry its own
+  # version. Prereleases keep the last stable: the chart default never points at a beta.
+  helm-chart:
+    name: Helm Chart Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Check Chart.yaml matches the tag
+        run: |
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "prerelease, chart stays on the last stable"
+            exit 0
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          CHART=docker/helm/tracearr/Chart.yaml
+          APP=$(awk '/^appVersion:/ {gsub(/"/, "", $2); print $2}' "$CHART")
+          CHART_VERSION=$(awk '/^version:/ {print $2}' "$CHART")
+          if [ "$APP" != "$VERSION" ] || [ "$CHART_VERSION" != "$VERSION" ]; then
+            echo "::error file=$CHART::version is $CHART_VERSION and appVersion is $APP; both must be $VERSION in the tagged commit"
+            exit 1
+          fi
+
   # Determine if this is a prerelease (alpha, beta, rc, etc.)
   check-release-type:
     name: Check Release Type
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, test, test-integration, release-notes]
+    needs: [lint-and-typecheck, test, test-integration, release-notes, helm-chart]
     outputs:
       prerelease: ${{ steps.check.outputs.prerelease }}
       # true when the next channel should follow this tag: every prerelease,
@@ -294,7 +321,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -359,7 +386,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -429,7 +456,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -494,7 +521,7 @@ jobs:
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Log in to Container Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -530,6 +557,81 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
+<<<<<<< HEAD
+=======
+  # Publish @tracearr/shared and @tracearr/translations, version-locked to the
+  # release tag so the mobile repo can pin the exact release it targets.
+  # Auth is npm trusted publishing (OIDC) configured against this workflow file.
+  # setup-node deliberately has no registry-url: the .npmrc auth line it writes
+  # breaks the OIDC exchange when NODE_AUTH_TOKEN is unset.
+  publish-packages:
+    name: Publish npm Packages
+    runs-on: ubuntu-latest
+    needs: [check-release-type, merge-docker, merge-supervised]
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 26
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @tracearr/shared --filter @tracearr/translations
+
+      - name: Publish to npm
+        run: |
+          npm --version
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${{ needs.check-release-type.outputs.prerelease == 'true' && 'next' || 'latest' }}"
+          for pkg in shared translations; do
+            if [ -n "$(npm view "@tracearr/${pkg}@${VERSION}" version 2>/dev/null)" ]; then
+              echo "@tracearr/${pkg}@${VERSION} already published, skipping"
+              continue
+            fi
+            (cd "packages/${pkg}" && npm pkg set version="$VERSION" && npm publish --tag "$TAG")
+          done
+          if [ "$TAG" = "latest" ] && [ "${{ needs.check-release-type.outputs.moves-next }}" = "true" ]; then
+            # The trusted-publishing login that publishes is refused for dist-tag changes
+            # (401 on v2.6.0), so a stuck next must not fail the job and skip the mobile sync
+            for pkg in shared translations; do
+              npm dist-tag add "@tracearr/${pkg}@${VERSION}" next \
+                || echo "::warning::next was not moved for @tracearr/${pkg}; run npm dist-tag add @tracearr/${pkg}@${VERSION} next by hand"
+            done
+          fi
+
+  # Tells Tracearr/Mobile-App to pin this release's published packages so the
+  # mobile app never drifts from a version the server actually shipped.
+  dispatch-mobile-sync:
+    name: Dispatch mobile package sync
+    runs-on: ubuntu-latest
+    needs: [publish-packages]
+    permissions: {}
+
+    steps:
+      - name: Tell Tracearr/Mobile-App to pin ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ secrets.MOBILE_APP_DISPATCH_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::MOBILE_APP_DISPATCH_TOKEN is not set; run the mobile sync by hand for $TAG"
+            exit 1
+          fi
+          gh api repos/Tracearr/Mobile-App/dispatches \
+            -f event_type=tracearr-release \
+            -F "client_payload[tag]=$TAG"
+
+>>>>>>> upstream/main
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -542,12 +644,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version: 26
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -563,7 +665,7 @@ jobs:
           path: release-notes-out
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes-out/release_notes.md
