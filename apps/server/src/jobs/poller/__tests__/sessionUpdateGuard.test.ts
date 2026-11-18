@@ -150,6 +150,7 @@ vi.mock('../violations.js', () => ({ broadcastViolations: vi.fn() }));
 
 import { initializePoller, triggerServerPoll } from '../processor.js';
 import { getActiveAutomations } from '../database.js';
+import { fakeJellyfinClient } from '../../../test/mediaServerFakes.js';
 
 const EXISTING_SESSION_ID = 'session-1';
 
@@ -230,16 +231,19 @@ describe('poller session update guard against stop races', () => {
     getPendingSession: ReturnType<typeof vi.fn>;
     withSessionCreateLock: ReturnType<typeof vi.fn>;
     hasTerminationCooldown: ReturnType<typeof vi.fn>;
-    hasTerminationCooldownComposite: ReturnType<typeof vi.fn>;
+    getTerminationCooldownsComposite: ReturnType<typeof vi.fn>;
+    clearTerminationCooldownsComposite: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateWhere.mockResolvedValue([]);
 
-    mockCreateMediaServerClient.mockReturnValue({
-      getSessions: vi.fn().mockResolvedValue([{}]),
-    });
+    mockCreateMediaServerClient.mockReturnValue(
+      fakeJellyfinClient({
+        getSessions: vi.fn().mockResolvedValue([{}]),
+      })
+    );
     mockMapMediaSession.mockReturnValue(processedSession());
     mockBuildActiveSession.mockReturnValue({ id: EXISTING_SESSION_ID, sessionKey: 'sess-key-1' });
     mockBatchFindActiveSessionsByComposite.mockResolvedValue(
@@ -251,7 +255,8 @@ describe('poller session update guard against stop races', () => {
       getPendingSession: vi.fn().mockResolvedValue(null),
       withSessionCreateLock: vi.fn().mockImplementation(async (_s, _k, op) => op()),
       hasTerminationCooldown: vi.fn().mockResolvedValue(false),
-      hasTerminationCooldownComposite: vi.fn().mockResolvedValue(false),
+      getTerminationCooldownsComposite: vi.fn().mockResolvedValue(new Map()),
+      clearTerminationCooldownsComposite: vi.fn(),
     };
 
     initializePoller(
@@ -319,16 +324,19 @@ describe('poller rediscovered-session guard against stop races', () => {
     getPendingSession: ReturnType<typeof vi.fn>;
     withSessionCreateLock: ReturnType<typeof vi.fn>;
     hasTerminationCooldown: ReturnType<typeof vi.fn>;
-    hasTerminationCooldownComposite: ReturnType<typeof vi.fn>;
+    getTerminationCooldownsComposite: ReturnType<typeof vi.fn>;
+    clearTerminationCooldownsComposite: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateWhere.mockResolvedValue([]);
 
-    mockCreateMediaServerClient.mockReturnValue({
-      getSessions: vi.fn().mockResolvedValue([{}]),
-    });
+    mockCreateMediaServerClient.mockReturnValue(
+      fakeJellyfinClient({
+        getSessions: vi.fn().mockResolvedValue([{}]),
+      })
+    );
     mockMapMediaSession.mockReturnValue(processedSession());
     mockBuildActiveSession.mockReturnValue({ id: EXISTING_SESSION_ID, sessionKey: 'sess-key-1' });
     mockFindActiveSession.mockResolvedValue(existingSessionRow());
@@ -340,7 +348,8 @@ describe('poller rediscovered-session guard against stop races', () => {
       getPendingSession: vi.fn().mockResolvedValue(null),
       withSessionCreateLock: vi.fn().mockImplementation(async (_s, _k, op) => op()),
       hasTerminationCooldown: vi.fn().mockResolvedValue(false),
-      hasTerminationCooldownComposite: vi.fn().mockResolvedValue(false),
+      getTerminationCooldownsComposite: vi.fn().mockResolvedValue(new Map()),
+      clearTerminationCooldownsComposite: vi.fn(),
     };
 
     initializePoller(

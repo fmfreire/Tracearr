@@ -96,6 +96,15 @@ describe('HistoryTable', () => {
     expect(screen.getByText('common:playback.watched')).toBeInTheDocument();
   });
 
+  it('marks a play with several segments by its count, and a single one not at all', () => {
+    const { unmount } = renderTable({ segmentCount: 3 });
+    expect(screen.getByLabelText('count.segment')).toHaveTextContent('3');
+    unmount();
+
+    renderTable({ segmentCount: 1 });
+    expect(screen.queryByLabelText('count.segment')).not.toBeInTheDocument();
+  });
+
   it('sorts the data table from its date header', () => {
     const onSortChange = vi.fn();
     renderTable({}, undefined, { sortBy: 'startedAt', sortDir: 'desc', onSortChange });
@@ -123,7 +132,9 @@ describe('HistoryTable', () => {
   it('lets long content titles shrink within the content column', () => {
     renderTable({ mediaTitle: 'A very long media title that should not overlap the next column' });
 
-    const title = screen.getByText('A very long media title that should not overlap the next column');
+    const title = screen.getByText(
+      'A very long media title that should not overlap the next column'
+    );
     expect(title.closest('span')).toHaveClass('min-w-0', 'flex-1', 'truncate');
   });
 

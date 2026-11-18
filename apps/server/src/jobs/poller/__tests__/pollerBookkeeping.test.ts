@@ -135,6 +135,7 @@ import {
   triggerReconciliationPoll,
   triggerServerPoll,
 } from '../processor.js';
+import { fakePlexClient } from '../../../test/mediaServerFakes.js';
 
 const serverRow1 = {
   id: 'server-1',
@@ -228,7 +229,8 @@ function createCacheService() {
     removeActiveSession: vi.fn().mockResolvedValue(undefined),
     removeUserSession: vi.fn().mockResolvedValue(undefined),
     hasTerminationCooldown: vi.fn().mockResolvedValue(false),
-    hasTerminationCooldownComposite: vi.fn().mockResolvedValue(false),
+    getTerminationCooldownsComposite: vi.fn().mockResolvedValue(new Map()),
+    clearTerminationCooldownsComposite: vi.fn(),
     addSessionWriteRetry: vi.fn().mockResolvedValue(undefined),
     invalidateDashboardStatsCache: vi.fn().mockResolvedValue(undefined),
   };
@@ -248,9 +250,11 @@ beforeEach(() => {
   mockIsInFallback.mockReturnValue(true);
   allServersRows = [serverRow1];
   currentCachedSessions = [];
-  mockCreateMediaServerClient.mockReturnValue({
-    getSessions: vi.fn().mockResolvedValue([]),
-  });
+  mockCreateMediaServerClient.mockReturnValue(
+    fakePlexClient({
+      getSessions: vi.fn().mockResolvedValue([]),
+    })
+  );
 
   cacheService = createCacheService();
   pubSubService = createPubSubService();

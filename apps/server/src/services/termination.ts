@@ -5,6 +5,7 @@
  * Supports both manual (admin-initiated) and automatic (rule-triggered) terminations.
  */
 
+import { SERVER_PROFILES, assertNever } from '@tracearr/shared';
 import { db } from '../db/client.js';
 import { terminationLogs, sessions } from '../db/schema.js';
 import { readSessionRow, sessionRowById } from '../db/sessions/row.js';
@@ -13,6 +14,7 @@ import { getCacheService, getPubSubService } from './cache.js';
 import { toRuleSession } from './automations/events/contextAssembly.js';
 import { dispatchSessionStopped } from './automations/events/producers.js';
 import { clearDbWriteTracking } from '../jobs/poller/dbWriteThrottle.js';
+import { buildCompositeKey, terminationSessionId } from '../jobs/poller/sessionIdentity.js';
 
 // ============================================================================
 // Types
@@ -139,13 +141,9 @@ export async function terminateSession(
     token: session.server.token,
   });
 
-  // Get the session ID for termination
-  // For Plex: use plexSessionId (Session.id) which is different from sessionKey
-  // For Jellyfin/Emby: use sessionKey directly
-  const terminationSessionId =
-    session.server.type === 'plex' ? session.plexSessionId : session.sessionKey;
+  const serverSessionId = terminationSessionId(session.server.type, session);
 
-  if (!terminationSessionId) {
+  if (!serverSessionId) {
     const logEntries = await db
       .insert(terminationLogs)
       .values({
@@ -169,7 +167,7 @@ export async function terminateSession(
   let outcome: TerminationOutcome;
 
   try {
-    await client.terminateSession(terminationSessionId, reason);
+    await client.terminateSession(serverSessionId, reason);
     success = true;
     outcome = 'terminated';
   } catch (err) {
@@ -215,23 +213,41 @@ export async function terminateSession(
     const cacheService = getCacheService();
     if (cacheService) {
       try {
+        const live = await cacheService.getSessionById(session.id);
         await cacheService.removeActiveSession(session.id);
 
-        // Cooldown prevents re-creating this session if it reappears in polls
-        if (session.ratingKey) {
-          if (session.server.type === 'plex') {
-            await cacheService.setTerminationCooldown(
-              session.serverId,
-              session.sessionKey,
-              session.ratingKey
-            );
-          } else {
-            await cacheService.setTerminationCooldownComposite(
-              session.serverId,
-              session.serverUserId,
-              session.deviceId || session.sessionKey,
-              session.ratingKey
-            );
+        // Keeps the server's leftover report of the killed playback from being re-created.
+        // A session the server no longer had leaves nothing behind to hold off.
+        if (outcome === 'terminated' && session.ratingKey) {
+          const identity = SERVER_PROFILES[session.server.type].sessionIdentity;
+          switch (identity) {
+            case 'sessionKey':
+              await cacheService.setTerminationCooldown(
+                session.serverId,
+                session.sessionKey,
+                session.ratingKey
+              );
+              break;
+            case 'composite':
+              await cacheService.setTerminationCooldownComposite(
+                session.serverId,
+                buildCompositeKey({
+                  serverType: session.server.type,
+                  serverId: session.serverId,
+                  externalUserId: session.serverUserId,
+                  deviceId: session.deviceId,
+                  ratingKey: session.ratingKey,
+                  sessionKey: session.sessionKey,
+                }),
+                {
+                  killedAt: now.getTime(),
+                  positionMs: (live ?? session).progressMs ?? 0,
+                  paused: (live ?? session).state === 'paused',
+                }
+              );
+              break;
+            default:
+              assertNever(identity);
           }
         }
       } catch (cacheErr) {

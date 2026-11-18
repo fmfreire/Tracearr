@@ -39,6 +39,7 @@ import {
   assertClaimCode,
   canMemberLogin,
   liveServerAccount,
+  mediaSignInClosed,
   notPermitted,
   refused,
   usableLoginMethods,
@@ -158,6 +159,7 @@ async function finishPlexMemberLogin(
   ctx: PlexEndpointCtx,
   authResult: { id: string } & PlexTokenMetadata
 ) {
+  if (await mediaSignInClosed()) throw refused();
   const rows = await db
     .select({ userId: serverUsers.userId, serverId: serverUsers.serverId })
     .from(serverUsers)
@@ -228,7 +230,7 @@ export const plexPlugin = () =>
             const authResult = await PlexClient.checkOAuthPin(pin.pinId);
 
             if (!authResult) {
-              return ctx.json({ authorized: false, message: 'PIN not yet authorized' });
+              return await ctx.json({ authorized: false, message: 'PIN not yet authorized' });
             }
             await getRedis().del(key);
             expireCookie(ctx, cookie);
@@ -311,7 +313,7 @@ export const plexPlugin = () =>
                 });
 
                 const sessionUser = await createSignedInSession(ctx, user.id);
-                return ctx.json({
+                return await ctx.json({
                   authorized: true,
                   user: { id: sessionUser.id, username: authResult.username, role: 'owner' },
                 });
@@ -371,7 +373,7 @@ export const plexPlugin = () =>
               });
 
               const sessionUser = await createSignedInSession(ctx, user.id);
-              return ctx.json({
+              return await ctx.json({
                 authorized: true,
                 user: { id: sessionUser.id, username: authResult.username, role: 'owner' },
               });
@@ -431,7 +433,7 @@ export const plexPlugin = () =>
                 })
               );
 
-              return ctx.json({
+              return await ctx.json({
                 authorized: true,
                 needsServerSelection: true,
                 servers: testedServers,
@@ -480,7 +482,7 @@ export const plexPlugin = () =>
             });
 
             const sessionUser = await createSignedInSession(ctx, newUser.id);
-            return ctx.json({
+            return await ctx.json({
               authorized: true,
               user: { id: sessionUser.id, username: newUser.username, role: 'owner' },
             });
@@ -675,7 +677,7 @@ export const plexPlugin = () =>
                   librariesSynced: result.librariesSynced,
                 });
               })
-              .catch((error) => {
+              .catch((error: unknown) => {
                 ctx.context.logger.error('Auto-sync failed for Plex server', {
                   err: error,
                   serverId,
@@ -683,7 +685,7 @@ export const plexPlugin = () =>
               });
 
             const sessionUser = await createSignedInSession(ctx, newUser.id);
-            return ctx.json({
+            return await ctx.json({
               authorized: true,
               user: { id: sessionUser.id, username: newUser.username, role: 'owner' },
             });

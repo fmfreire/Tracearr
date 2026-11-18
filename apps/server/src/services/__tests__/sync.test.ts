@@ -15,7 +15,8 @@ vi.mock('../../db/client.js', () => ({
   createRawPgClient: () => ({ connect: vi.fn(), query: vi.fn(), end: vi.fn(async () => {}) }),
 }));
 vi.mock('../mediaServer/index.js', () => ({
-  createMediaServerClient: () => ({ getUsers: mockGetUsers, getLibraries: mockGetLibraries }),
+  createMediaServerClient: () =>
+    fakeJellyfinClient({ getUsers: mockGetUsers, getLibraries: mockGetLibraries }),
   PlexClient: class {},
 }));
 vi.mock('../userService.js', () => ({
@@ -31,6 +32,7 @@ import { revokeSessionsForServerUsers } from '../../lib/revoke.js';
 import { clearScope } from '../../lib/scope.js';
 import { syncUserFromMediaServer } from '../userService.js';
 import { syncServer } from '../sync.js';
+import { fakeJellyfinClient } from '../../test/mediaServerFakes.js';
 
 const SERVER = {
   id: 'srv-1',
@@ -83,6 +85,15 @@ describe('syncServer revocation', () => {
 
     expect(revokeSessionsForServerUsers).not.toHaveBeenCalled();
     expect(clearScope).toHaveBeenCalledExactlyOnceWith('u-back');
+  });
+
+  it('reports a failed user write as a sync error instead of rejecting', async () => {
+    vi.mocked(syncUserFromMediaServer).mockResolvedValue(synced('su-1', false));
+    mockReturning.mockRejectedValueOnce(new Error('connection terminated'));
+
+    const result = await syncServer('srv-1', { syncUsers: true, syncLibraries: false });
+
+    expect(result.errors).toEqual([expect.stringContaining('connection terminated')]);
   });
 });
 

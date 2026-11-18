@@ -164,6 +164,7 @@ export type {
   RateLimitStatus,
   PushEventPreference,
   PushDeliveryStatus,
+  PushSwitch,
   NotificationPreferencesWithStatus,
   EncryptedPushPayload,
   PushNotificationPayload,
@@ -210,12 +211,9 @@ export type {
   EngagementTier,
   UserBehaviorType,
   ContentEngagement,
-  TopContentEngagement,
-  ShowEngagement,
   UserEngagementProfile,
   EngagementTierBreakdown,
   EngagementStats,
-  ShowStatsResponse,
   // Device compatibility
   DeviceCompatibilityRow,
   DeviceCompatibilityResponse,
@@ -602,7 +600,6 @@ export {
   engagementTierSchema,
   userBehaviorTypeSchema,
   engagementQuerySchema,
-  showsQuerySchema,
   // Library stats
   libraryStatsQuerySchema,
   libraryStatusQuerySchema,
@@ -805,7 +802,6 @@ export type {
   ImportJobStatus,
   // Engagement tracking
   EngagementQueryInput,
-  ShowsQueryInput,
   // Library stats
   LibraryStatsQueryInput,
   LibraryStatusQueryInput,
@@ -1005,6 +1001,14 @@ export {
   trustLevel,
   type TrustLevel,
 } from './trustLevel.js';
+
+export {
+  SERVER_TYPES,
+  assertNever,
+  isServerType,
+  type JellyfinEmbyServerType,
+} from './serverTypes.js';
+export { SERVER_PROFILES, type ServerProfile } from './serverProfiles.js';
 
 // Server-scope selection (cache-key and query-param builders)
 export {

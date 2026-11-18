@@ -59,9 +59,7 @@ const {
 
   return {
     mockRequestSyncForUnknownKeys: vi.fn(),
-    mockCreateMediaServerClient: vi.fn().mockReturnValue({
-      getSessions: vi.fn().mockResolvedValue([{}]),
-    }),
+    mockCreateMediaServerClient: vi.fn(),
     mockMapMediaSession: vi.fn(),
     mockUpdatePendingSession: vi.fn(),
     mockConfirmAndPersistSession: vi.fn(),
@@ -157,6 +155,11 @@ vi.mock('../sessionMapper.js', () => ({
 vi.mock('../violations.js', () => ({ broadcastViolations: vi.fn() }));
 
 import { initializePoller, triggerServerPoll } from '../processor.js';
+import { fakePlexClient } from '../../../test/mediaServerFakes.js';
+
+mockCreateMediaServerClient.mockReturnValue(
+  fakePlexClient({ getSessions: vi.fn().mockResolvedValue([{}]) })
+);
 
 function createPendingSessionData(): PendingSessionData {
   const now = Date.now();
@@ -242,7 +245,8 @@ describe('poller confirms a pending session with the confirming user recent-sess
     setPendingSession: ReturnType<typeof vi.fn>;
     withSessionCreateLock: ReturnType<typeof vi.fn>;
     hasTerminationCooldown: ReturnType<typeof vi.fn>;
-    hasTerminationCooldownComposite: ReturnType<typeof vi.fn>;
+    getTerminationCooldownsComposite: ReturnType<typeof vi.fn>;
+    clearTerminationCooldownsComposite: ReturnType<typeof vi.fn>;
     addActiveSession: ReturnType<typeof vi.fn>;
     addUserSession: ReturnType<typeof vi.fn>;
     removeActiveSession: ReturnType<typeof vi.fn>;
@@ -299,7 +303,8 @@ describe('poller confirms a pending session with the confirming user recent-sess
       setPendingSession: vi.fn(),
       withSessionCreateLock: vi.fn().mockImplementation(async (_s, _k, op) => op()),
       hasTerminationCooldown: vi.fn().mockResolvedValue(false),
-      hasTerminationCooldownComposite: vi.fn().mockResolvedValue(false),
+      getTerminationCooldownsComposite: vi.fn().mockResolvedValue(new Map()),
+      clearTerminationCooldownsComposite: vi.fn(),
       addActiveSession: vi.fn(),
       addUserSession: vi.fn(),
       removeActiveSession: vi.fn(),
@@ -385,9 +390,11 @@ describe('poller confirms a pending session with the confirming user recent-sess
         deviceId: `device-${mapCallCount}`,
       };
     });
-    mockCreateMediaServerClient.mockReturnValue({
-      getSessions: vi.fn().mockResolvedValue([{}, {}]),
-    });
+    mockCreateMediaServerClient.mockReturnValue(
+      fakePlexClient({
+        getSessions: vi.fn().mockResolvedValue([{}, {}]),
+      })
+    );
 
     cacheService.getAllActiveSessions.mockResolvedValue([
       { ...cachedPendingActiveSession, id: 'pending-uuid-1', sessionKey: 'sk-41' },

@@ -141,6 +141,7 @@ vi.mock('../../services/serviceTracker.js', () => ({
 }));
 
 import { initializeSSEProcessor, startSSEProcessor, stopSSEProcessor } from '../sseProcessor.js';
+import { fakePlexClient } from '../../test/mediaServerFakes.js';
 
 const SERVER_ID = 'server-1';
 const SESSION_KEY = 'sess-key-1';
@@ -187,7 +188,8 @@ const mockCacheService = {
   withSessionCreateLock: vi.fn(),
   hasTerminationCooldown: vi.fn().mockResolvedValue(false),
   setTerminationCooldown: vi.fn(),
-  hasTerminationCooldownComposite: vi.fn().mockResolvedValue(false),
+  getTerminationCooldownsComposite: vi.fn().mockResolvedValue(new Map()),
+  clearTerminationCooldownsComposite: vi.fn(),
   setTerminationCooldownComposite: vi.fn(),
   getPendingSession: vi.fn().mockResolvedValue(null),
   setPendingSession: vi.fn(),
@@ -233,9 +235,11 @@ describe('SSE Processor - cross-user guards on pause and stop', () => {
     mockFindActiveSession.mockResolvedValue(staleRow);
     mockCacheService.getPendingSession.mockResolvedValue(null);
     mockCacheService.getSessionById.mockResolvedValue({ id: staleRow.id, progressMs: 0 });
-    mockCreateMediaServerClient.mockReturnValue({
-      getSessions: vi.fn().mockResolvedValue([incomingPlexSession]),
-    });
+    mockCreateMediaServerClient.mockReturnValue(
+      fakePlexClient({
+        getSessions: vi.fn().mockResolvedValue([incomingPlexSession]),
+      })
+    );
     mockStopSessionAtomic.mockResolvedValue({
       wasUpdated: true,
       durationMs: 1000,
