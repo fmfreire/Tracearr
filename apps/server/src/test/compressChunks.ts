@@ -10,12 +10,26 @@ import { db } from '../db/client.js';
 import { invalidateTimescaleStatusCache } from '../db/timescale.js';
 
 const SERIALIZATION_FAILURE = '40001';
+const ALREADY_COMPRESSED = '42710';
 const MAX_ATTEMPTS = 5;
 
 function isSerializationFailure(error: unknown): boolean {
   const direct = (error as { code?: string }).code;
   const wrapped = (error as { cause?: { code?: string } }).cause?.code;
   return direct === SERIALIZATION_FAILURE || wrapped === SERIALIZATION_FAILURE;
+}
+
+function isAlreadyCompressed(error: unknown): boolean {
+  const direct = (error as { code?: string }).code;
+  const wrapped = (error as { cause?: { code?: string } }).cause?.code;
+  const msg = (error as { message?: string }).message || '';
+  const wrappedMsg = (error as { cause?: { message?: string } }).cause?.message || '';
+  return (
+    direct === ALREADY_COMPRESSED ||
+    wrapped === ALREADY_COMPRESSED ||
+    msg.includes('already compressed') ||
+    wrappedMsg.includes('already compressed')
+  );
 }
 
 export async function compressSessionChunks(olderThanDays?: number): Promise<unknown[]> {
@@ -26,10 +40,14 @@ export async function compressSessionChunks(olderThanDays?: number): Promise<unk
 
   for (let attempt = 1; ; attempt++) {
     try {
-      const result = await db.execute(sql`SELECT compress_chunk(c, true) FROM ${chunks} AS c`);
+      const result = await db.execute(sql`SELECT compress_chunk(c, if_not_compressed => true) FROM ${chunks} AS c`);
       invalidateTimescaleStatusCache();
       return result.rows;
     } catch (error) {
+      if (isAlreadyCompressed(error)) {
+        invalidateTimescaleStatusCache();
+        return [];
+      }
       if (attempt >= MAX_ATTEMPTS || !isSerializationFailure(error)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
     }
