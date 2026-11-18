@@ -36,7 +36,7 @@ param(
   [switch]$Force = $false
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 function Write-Utf8NoBom([string]$filePath, [string]$text) {
@@ -139,41 +139,38 @@ if (-not (Test-Path $releaseNotesFile)) {
   $todayStr = (Get-Date).ToString("yyyy-MM-dd")
   $parsed = Parse-SemVer $nextVersion
   if ($parsed -and $parsed.Patch -eq 0 -and ($parsed.Major + $parsed.Minor -gt 0)) {
-    $template = @"
-{
-  "version": "$nextVersion",
-  "date": "$todayStr",
-  "headline": "Tracearr $nextVersion release",
-  "highlights": [
-    {
-      "title": "Release updates",
-      "body": "Includes latest upstream improvements and features."
+    $noteObj = [PSCustomObject]@{
+      version = $nextVersion
+      date = $todayStr
+      headline = "Tracearr $nextVersion release"
+      highlights = @(
+        [PSCustomObject]@{
+          title = "Release updates"
+          body = "Includes latest upstream improvements and features."
+        }
+      )
+      changes = @(
+        [PSCustomObject]@{
+          type = "new"
+          text = "Synchronized with upstream releases."
+          refs = @()
+        }
+      )
     }
-  ],
-  "changes": [
-    {
-      "type": "new",
-      "text": "Synchronized with upstream releases.",
-      "refs": []
-    }
-  ]
-}
-"@
   } else {
-    $template = @"
-{
-  "version": "$nextVersion",
-  "date": "$todayStr",
-  "changes": [
-    {
-      "type": "fix",
-      "text": "Maintenance release and upstream synchronization.",
-      "refs": []
+    $noteObj = [PSCustomObject]@{
+      version = $nextVersion
+      date = $todayStr
+      changes = @(
+        [PSCustomObject]@{
+          type = "fix"
+          text = "Maintenance release and upstream synchronization."
+          refs = @()
+        }
+      )
     }
-  ]
-}
-"@
   }
+  $template = $noteObj | ConvertTo-Json -Depth 5
   Write-Utf8NoBom $releaseNotesFile $template
   $createdReleaseNotes = $true
 }
