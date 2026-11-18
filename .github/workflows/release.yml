@@ -139,7 +139,7 @@ jobs:
           --health-retries 10
 
       redis:
-        image: redis:8-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
+        image: redis:8-alpine@sha256:7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3
         ports:
           - 6380:6379
         options: >-
@@ -557,81 +557,7 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
-<<<<<<< HEAD
-=======
-  # Publish @tracearr/shared and @tracearr/translations, version-locked to the
-  # release tag so the mobile repo can pin the exact release it targets.
-  # Auth is npm trusted publishing (OIDC) configured against this workflow file.
-  # setup-node deliberately has no registry-url: the .npmrc auth line it writes
-  # breaks the OIDC exchange when NODE_AUTH_TOKEN is unset.
-  publish-packages:
-    name: Publish npm Packages
-    runs-on: ubuntu-latest
-    needs: [check-release-type, merge-docker, merge-supervised]
-    permissions:
-      contents: read
-      id-token: write
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with:
-          node-version: 26
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter @tracearr/shared --filter @tracearr/translations
-
-      - name: Publish to npm
-        run: |
-          npm --version
-          VERSION="${GITHUB_REF_NAME#v}"
-          TAG="${{ needs.check-release-type.outputs.prerelease == 'true' && 'next' || 'latest' }}"
-          for pkg in shared translations; do
-            if [ -n "$(npm view "@tracearr/${pkg}@${VERSION}" version 2>/dev/null)" ]; then
-              echo "@tracearr/${pkg}@${VERSION} already published, skipping"
-              continue
-            fi
-            (cd "packages/${pkg}" && npm pkg set version="$VERSION" && npm publish --tag "$TAG")
-          done
-          if [ "$TAG" = "latest" ] && [ "${{ needs.check-release-type.outputs.moves-next }}" = "true" ]; then
-            # The trusted-publishing login that publishes is refused for dist-tag changes
-            # (401 on v2.6.0), so a stuck next must not fail the job and skip the mobile sync
-            for pkg in shared translations; do
-              npm dist-tag add "@tracearr/${pkg}@${VERSION}" next \
-                || echo "::warning::next was not moved for @tracearr/${pkg}; run npm dist-tag add @tracearr/${pkg}@${VERSION} next by hand"
-            done
-          fi
-
-  # Tells Tracearr/Mobile-App to pin this release's published packages so the
-  # mobile app never drifts from a version the server actually shipped.
-  dispatch-mobile-sync:
-    name: Dispatch mobile package sync
-    runs-on: ubuntu-latest
-    needs: [publish-packages]
-    permissions: {}
-
-    steps:
-      - name: Tell Tracearr/Mobile-App to pin ${{ github.ref_name }}
-        env:
-          GH_TOKEN: ${{ secrets.MOBILE_APP_DISPATCH_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::MOBILE_APP_DISPATCH_TOKEN is not set; run the mobile sync by hand for $TAG"
-            exit 1
-          fi
-          gh api repos/Tracearr/Mobile-App/dispatches \
-            -f event_type=tracearr-release \
-            -F "client_payload[tag]=$TAG"
-
->>>>>>> upstream/main
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -654,6 +580,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter @tracearr/server...
+
+      - name: Build shared
+        run: pnpm --filter @tracearr/shared build
 
       - name: Generate OpenAPI specs
         run: pnpm --filter @tracearr/server openapi:dump "$GITHUB_WORKSPACE"
