@@ -218,7 +218,8 @@ if (-not $SkipPR) {
   Write-Host "`n📝 Preparing branch with updates for $nextVersion..." -ForegroundColor Cyan
   if ($needsChartBump) {
     $chartContent = $chartContent -replace '(?m)^version:\s*\S+', "version: $nextVersion"
-    $chartContent = $chartContent -replace '(?m)^appVersion:\s*"?\S+"?', "appVersion: `"$nextVersion`""
+    $appVerReplacement = 'appVersion: "' + $nextVersion + '"'
+    $chartContent = $chartContent -replace '(?m)^appVersion:\s*"?\S+"?', $appVerReplacement
     Write-Utf8NoBom $chartFile $chartContent
   }
 
