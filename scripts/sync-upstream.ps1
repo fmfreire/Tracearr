@@ -132,6 +132,121 @@ if ($LASTEXITCODE -ne 0) {
     & git add $rnFile
   }
 
+  # 5. Full user detail and shared types conflicts: preserve both fork membership fields and upstream additions
+  $combineFiles = @(
+    "apps/server/src/routes/users/full.ts",
+    "packages/shared/src/types.ts"
+  )
+  foreach ($cf in $combineFiles) {
+    $fullPath = Join-Path $repoRoot $cf
+    if (Test-Path $fullPath) {
+      $status = & git status --porcelain $cf
+      if ($status -and $status -match '^(UU|AA|U )') {
+        Write-Host "  -> Resolving $cf conflict (preserving membership fields and upstream additions)..." -ForegroundColor Gray
+        $content = Get-Content $fullPath -Raw
+        $resolved = [regex]::Replace($content, '(?ms)<<<<<<< HEAD\r?\n(.*?)\r?\n=======\r?\n(.*?)\r?\n>>>>>>>[^\r\n]*\r?\n', {
+          param($m)
+          $ourSide = $m.Groups[1].Value
+          $theirSide = $m.Groups[2].Value
+          return "$ourSide`n$theirSide`n"
+        })
+        if ($resolved -ne $content) {
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText($fullPath, $resolved, $utf8NoBom)
+          & git add $cf
+        }
+      }
+    }
+  }
+
+  # 6. Database migration snapshots conflict: accept upstream's snapshots
+  $conflictedSnapshots = & git diff --name-only --diff-filter=U | Where-Object { $_ -like "apps/server/src/db/migrations/meta/*_snapshot.json" }
+  foreach ($snap in $conflictedSnapshots) {
+    Write-Host "  -> Resolving migration snapshot conflict in $snap (accepting upstream)..." -ForegroundColor Gray
+    & git checkout --theirs $snap 2>&1 | Out-Null
+    & git add $snap
+  }
+
+  # 7. Database migration journal conflict: ensure membership migration is positioned after upstream migrations
+  $journalFile = "apps/server/src/db/migrations/meta/_journal.json"
+  $journalStatus = & git status --porcelain $journalFile
+  if ($journalStatus -and $journalStatus -match '^(UU|AA|U )') {
+    Write-Host "  -> Resolving _journal.json conflict (positioning membership enforcement after upstream migrations)..." -ForegroundColor Gray
+    & git checkout --theirs $journalFile 2>&1 | Out-Null
+    $journalFullPath = Join-Path $repoRoot $journalFile
+    $journalJson = Get-Content $journalFullPath -Raw | ConvertFrom-Json
+
+    # Find highest index from upstream entries excluding membership_enforcement
+    $upstreamEntries = $journalJson.entries | Where-Object { $_.tag -notlike "*membership_enforcement*" }
+    $maxIdx = -1
+    $lastTag = ""
+    foreach ($entry in $upstreamEntries) {
+      if ($entry.idx -gt $maxIdx) {
+        $maxIdx = $entry.idx
+        $lastTag = $entry.tag
+      }
+    }
+
+    $nextIdx = $maxIdx + 1
+    $paddedIdx = $nextIdx.ToString("D4")
+    $newTag = "${paddedIdx}_membership_enforcement"
+
+    # Find the current membership migration SQL file
+    $migDir = Join-Path $repoRoot "apps/server/src/db/migrations"
+    $currentSqlFile = Get-ChildItem -Path $migDir -Filter "*membership_enforcement.sql" | Select-Object -First 1
+    if ($currentSqlFile) {
+      $targetSqlPath = Join-Path $migDir "$newTag.sql"
+      if ($currentSqlFile.FullName -ne $targetSqlPath) {
+        & git mv -f $currentSqlFile.FullName $targetSqlPath 2>&1 | Out-Null
+      }
+      & git add $targetSqlPath
+    }
+
+    # Find previous snapshot ID to chain
+    $lastSnapshotPath = Join-Path $migDir "meta\${lastTag.Substring(0,4)}_snapshot.json"
+    $prevId = ""
+    if (Test-Path $lastSnapshotPath) {
+      $lastSnapContent = Get-Content $lastSnapshotPath -Raw | ConvertFrom-Json
+      $prevId = $lastSnapContent.id
+    }
+
+    # Create/update the new snapshot
+    $currentSnapFile = Get-ChildItem -Path (Join-Path $migDir "meta") -Filter "*membership_enforcement*" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $currentSnapFile) {
+      $currentSnapFile = Get-ChildItem -Path (Join-Path $migDir "meta") -Filter "*133_snapshot.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    $targetSnapPath = Join-Path $migDir "meta\${paddedIdx}_snapshot.json"
+    if ($currentSnapFile -and (Test-Path $currentSnapFile.FullName)) {
+      $snapData = Get-Content $currentSnapFile.FullName -Raw | ConvertFrom-Json
+      $snapData.id = [guid]::NewGuid().ToString()
+      if ($prevId) { $snapData.prevId = $prevId }
+      $snapJson = $snapData | ConvertTo-Json -Depth 100
+      $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+      [System.IO.File]::WriteAllText($targetSnapPath, $snapJson, $utf8NoBom)
+      if ($currentSnapFile.FullName -ne $targetSnapPath) {
+        & git rm -f $currentSnapFile.FullName 2>$null | Out-Null
+      }
+      & git add $targetSnapPath
+    }
+
+    # Update journal entries list
+    $newEntry = [PSCustomObject]@{
+      idx = $nextIdx
+      version = "7"
+      when = 1793721824219
+      tag = $newTag
+      breakpoints = $true
+    }
+    $finalEntries = [System.Collections.ArrayList]@($upstreamEntries)
+    [void]$finalEntries.Add($newEntry)
+    $journalJson.entries = $finalEntries
+
+    $updatedJournalJson = $journalJson | ConvertTo-Json -Depth 10
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($journalFullPath, $updatedJournalJson, $utf8NoBom)
+    & git add $journalFile
+  }
+
   # Check if other conflicts remain
   $remainingConflicts = & git diff --name-only --diff-filter=U
   if ($remainingConflicts) {
