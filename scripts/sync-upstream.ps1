@@ -17,7 +17,7 @@ param(
   [switch]$SkipZip = $false
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 
 # Ensure Git and GitHub CLI are in PATH
 $gitCmdPaths = @(
@@ -124,40 +124,12 @@ if ($LASTEXITCODE -ne 0) {
     }
   }
 
-  # 4. Release notes conflicts: merge changes arrays from both sides
+  # 4. Release notes conflicts: accept upstream version
   $conflictedReleaseNotes = & git diff --name-only --diff-filter=U | Where-Object { $_ -like "release-notes/*.json" }
   foreach ($rnFile in $conflictedReleaseNotes) {
-    Write-Host "  -> Auto-merging release notes conflict in $rnFile..." -ForegroundColor Gray
-    $rnContent = Get-Content (Join-Path $repoRoot $rnFile) -Raw
-    if ($rnContent -match '(?ms)<<<<<<< HEAD\r?\n(.*?)\r?\n=======\r?\n(.*?)\r?\n>>>>>>>') {
-      $ourBlock = $Matches[1]
-      $theirBlock = $Matches[2]
-
-      # Extract changes from our block and their block
-      $ourChanges = [regex]::Matches($ourBlock, '(?ms)\{\s*"type":.*?\}(?=\s*,\s*\{|\s*\]|\s*$)') | ForEach-Object { $_.Value }
-      $theirChanges = [regex]::Matches($theirBlock, '(?ms)\{\s*"type":.*?\}(?=\s*,\s*\{|\s*\]|\s*$)') | ForEach-Object { $_.Value }
-
-      # Extract version and date (prefer upstream date or our date)
-      $ver = if ($rnContent -match '"version":\s*"([^"]+)"') { $Matches[1] } else { "" }
-      $date = if ($theirBlock -match '"date":\s*"([^"]+)"') { $Matches[1] } elseif ($ourBlock -match '"date":\s*"([^"]+)"') { $Matches[1] } else { (Get-Date -Format "yyyy-MM-dd") }
-
-      $combinedChanges = @()
-      $combinedChanges += $theirChanges
-      $combinedChanges += $ourChanges
-
-      $changesFormatted = ($combinedChanges | Where-Object { [string]::IsNullOrWhiteSpace($_) -eq $false }) -join ",`n    "
-      $mergedJson = @"
-{
-  "version": "$ver",
-  "date": "$date",
-  "changes": [
-    $changesFormatted
-  ]
-}
-"@
-      Set-Content -Path (Join-Path $repoRoot $rnFile) -Value $mergedJson
-      & git add $rnFile
-    }
+    Write-Host "  -> Accepting upstream release notes in $rnFile..." -ForegroundColor Gray
+    & git checkout --theirs $rnFile 2>&1 | Out-Null
+    & git add $rnFile
   }
 
   # Check if other conflicts remain
@@ -189,12 +161,12 @@ Write-Host "==> Merging PR into main with admin approval..." -ForegroundColor Cy
 & gh pr merge $prUrl --repo fmfreire/Tracearr --merge --admin
 
 Write-Host "==> Pulling updated main locally..." -ForegroundColor Cyan
-& git checkout . 2>$null
-& git checkout main
-& git pull origin main
+& git checkout . 2>&1 | Out-Null
+& git checkout main 2>&1 | Out-Null
+& git pull origin main 2>&1 | Write-Host
 
 Write-Host "==> Cleaning up local branch $syncBranch..." -ForegroundColor Gray
-& git branch -d $syncBranch
+& git branch -D $syncBranch 2>&1 | Out-Null
 
 if (-not $SkipZip) {
   Write-Host "==> Packaging fresh deployment zip..." -ForegroundColor Cyan
