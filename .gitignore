@@ -68,3 +68,5 @@ drizzle-kit
 *.tsbuildinfo
 apps/e2e/showcase/assets/
 apps/e2e/showcase/out/
+
+*.zip

@@ -1,6 +1,17 @@
 {
   "version": "3.2.0",
   "date": "2026-11-16",
+  "headline": "Support for Tofa media server, refreshed theme, and owner SSO",
+  "highlights": [
+    {
+      "title": "Tofa media server",
+      "body": "Support for Tofa, with live sessions, library, history import, and built-in requests without pasting an API key."
+    },
+    {
+      "title": "Refreshed theme & setup",
+      "body": "First-run setup walks through signing in and connecting servers, with refreshed themes and better contrast."
+    }
+  ],
   "upgradeWarning": "Back up before upgrading. Request ids are stored differently from this release on, so going back to an older version needs that backup",
   "changes": [
     {
